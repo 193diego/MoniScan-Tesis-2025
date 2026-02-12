@@ -1,0 +1,68 @@
+name: tesis26
+description: "Aplicación para detección y seguimiento de Moniliasis en cacao"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.10.1
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # Firebase core y servicios
+  firebase_core: ^3.15.2
+  firebase_auth: ^5.3.0
+  cloud_firestore: ^5.5.0
+  firebase_storage: ^12.3.0
+
+  # Utilidades Firebase
+  firebase_analytics: ^11.4.0
+  firebase_crashlytics: ^4.3.10
+  
+  # UI y Networking
+  cached_network_image: ^3.3.1
+
+  # UI y Navegación
+  cupertino_icons: ^1.0.8
+  elegant_nav_bar: ^0.0.22
+  
+  # Visión Artificial - SOLUCIÓN MODERNA Y SIMPLE
+  ultralytics_yolo: ^0.2.0
+  lite_vision_ai: ^1.0.1      # ← LIBRERÍA MODERNA (Nov 2024)
+  image: ^4.2.0
+  camera: ^0.11.0+2
+  image_picker: ^1.1.2
+  
+  # Base de Datos Local (SQLite)
+  sqflite: ^2.4.1
+  path_provider: ^2.1.5
+  path: ^1.9.0
+  
+  # Geolocalización
+  geolocator: ^12.0.0
+  geocoding: ^3.0.0
+  google_maps_flutter: ^2.9.0
+  
+  # Utilidades
+  intl: ^0.19.0
+  uuid: ^4.5.1
+  shared_preferences: ^2.3.3
+  permission_handler: ^11.3.1
+  
+  # Conectividad
+  connectivity_plus: ^5.0.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_launcher_icons: ^0.14.2
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  
+  assets:
+    - assets/logo.png
+    - assets/models/labels.txt
+    - assets/models/best_float32.tflite
