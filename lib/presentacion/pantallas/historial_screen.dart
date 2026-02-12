@@ -14,7 +14,6 @@ import 'escaneo_screen.dart';
 
 class HistorialScreen extends StatefulWidget {
   final String cedulaUsuario;
-
   const HistorialScreen({super.key, required this.cedulaUsuario});
 
   @override
@@ -50,10 +49,7 @@ class _HistorialScreenState extends State<HistorialScreen> {
 
     try {
       final conectividad = await Connectivity().checkConnectivity();
-      // CORREGIDO: checkConnectivity() devuelve ConnectivityResult (NO lista)
       final tieneInternet = conectividad != ConnectivityResult.none;
-
-      debugPrint('📡 Internet: $tieneInternet');
 
       if (tieneInternet && _modoOnline) {
         try {
@@ -76,7 +72,6 @@ class _HistorialScreenState extends State<HistorialScreen> {
 
       throw Exception('Sin conexión');
     } catch (e) {
-      debugPrint('⚠️ Usando SQLite: $e');
       final gruposLocales = await _db.obtenerGruposImagenes(
         widget.cedulaUsuario,
       );
@@ -101,7 +96,6 @@ class _HistorialScreenState extends State<HistorialScreen> {
   }
 
   Future<List<Map<String, dynamic>>> _cargarGruposFirebase() async {
-    debugPrint('⬇️ Cargando desde Firebase...');
     final snapshot = await _firestore
         .collection('detecciones')
         .where('idUsuario', isEqualTo: widget.cedulaUsuario)
@@ -121,15 +115,12 @@ class _HistorialScreenState extends State<HistorialScreen> {
       if (grupoImagen == null || grupoImagen.isEmpty) continue;
 
       if (!gruposMap.containsKey(grupoImagen)) {
-        final timestampRaw = data['timestamp'] ?? data['fecha'];
         gruposMap[grupoImagen] = {
           'grupoImagen': grupoImagen,
           'imagenUrl': data['imagenUrl'],
-          'timestamp': timestampRaw,
+          'timestamp': data['timestamp'] ?? data['fecha'],
           'totalDetecciones': 1,
           'lote': data['lote'],
-          'latitud': data['latitud'],
-          'longitud': data['longitud'],
         };
         fasesPorGrupoTemp[grupoImagen] = {fase};
       } else {
@@ -140,18 +131,7 @@ class _HistorialScreenState extends State<HistorialScreen> {
     }
 
     _fasesPorGrupo = fasesPorGrupoTemp;
-
-    final listaGrupos = gruposMap.values.toList();
-    listaGrupos.sort((a, b) {
-      final timestampA = a['timestamp'];
-      final timestampB = b['timestamp'];
-      if (timestampA is Timestamp && timestampB is Timestamp) {
-        return timestampB.compareTo(timestampA);
-      }
-      return 0;
-    });
-
-    return listaGrupos;
+    return gruposMap.values.toList();
   }
 
   Future<void> _sincronizarConSQLite(
@@ -166,20 +146,20 @@ class _HistorialScreenState extends State<HistorialScreen> {
       for (var doc in snapshot.docs) {
         final data = doc.data();
         final deteccion = Deteccion(
-          idMazorca: data['idMazorca'] as String,
-          grupoImagen: data['grupoImagen'] as String?,
-          idUsuario: data['idUsuario'] as String,
-          workerId: data['workerId'] as String?,
-          fase: data['fase'] as String,
+          idMazorca: data['idMazorca'],
+          grupoImagen: data['grupoImagen'],
+          idUsuario: data['idUsuario'],
+          workerId: data['workerId'],
+          fase: data['fase'],
           confianza: (data['confianza'] as num).toDouble(),
-          severidad: data['severidad'] as int,
-          colorSemaforo: data['colorSemaforo'] as String,
-          rutaImagen: data['imagenUrl'] as String,
+          severidad: data['severidad'],
+          colorSemaforo: data['colorSemaforo'],
+          rutaImagen: data['imagenUrl'],
           latitud: (data['latitud'] as num?)?.toDouble() ?? 0.0,
           longitud: (data['longitud'] as num?)?.toDouble() ?? 0.0,
-          direccion: data['direccion'] as String?,
-          lote: data['lote'] as String?,
-          notas: data['notas'] as String?,
+          direccion: data['direccion'],
+          lote: data['lote'],
+          notas: data['notas'],
           fecha: (data['timestamp'] ?? data['fecha']).toDate(),
           sincronizado: true,
         );
@@ -213,36 +193,33 @@ class _HistorialScreenState extends State<HistorialScreen> {
     );
 
     if (confirmar != true || _disposed) return;
-
     if (!mounted || _disposed) return;
-    _mostrarDialogoCarga('Eliminando...');
 
+    _mostrarDialogoCarga('Eliminando...');
     try {
       final exito = await _servicioEliminacion.eliminarGrupoImagen(
         grupoImagen: grupoImagen,
         idUsuario: widget.cedulaUsuario,
       );
-
-      if (!mounted || _disposed) return;
-      Navigator.pop(context);
-
-      if (exito) {
-        await _cargarGruposImagenes();
-        if (!mounted || _disposed) return;
-        _mostrarMensaje('✅ Eliminado');
-      } else {
-        _mostrarError('Error eliminando');
+      if (!_disposed && mounted) {
+        Navigator.pop(context);
+        if (exito) {
+          await _cargarGruposImagenes();
+          if (!_disposed && mounted) _mostrarMensaje('✅ Eliminado');
+        } else {
+          _mostrarError('Error eliminando');
+        }
       }
     } catch (e) {
-      if (!mounted || _disposed) return;
-      Navigator.pop(context);
-      _mostrarError('Error: $e');
+      if (!_disposed && mounted) {
+        Navigator.pop(context);
+        _mostrarError('Error: $e');
+      }
     }
   }
 
   Future<void> _verDetalle(String? grupoImagen) async {
     if (_disposed || grupoImagen == null) return;
-
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -255,19 +232,16 @@ class _HistorialScreenState extends State<HistorialScreen> {
 
   Future<void> _darSeguimiento(String? grupoImagen) async {
     if (_disposed || grupoImagen == null) return;
-
     try {
       List<Deteccion> detecciones = await _db.obtenerDeteccionesPorGrupo(
         grupoImagen,
       );
-
       if (detecciones.isEmpty) {
         final snapshot = await _firestore
             .collection('detecciones')
             .where('grupoImagen', isEqualTo: grupoImagen)
             .limit(1)
             .get();
-
         if (snapshot.docs.isNotEmpty) {
           final data = snapshot.docs.first.data();
           detecciones = [
@@ -292,23 +266,18 @@ class _HistorialScreenState extends State<HistorialScreen> {
           ];
         }
       }
-
       if (detecciones.isEmpty) {
-        if (!_disposed && mounted) {
+        if (!_disposed && mounted)
           _mostrarError('No se encontraron detecciones');
-        }
         return;
       }
-
-      final primeraDeteccion = detecciones.first;
-
       if (!_disposed && mounted) {
         Navigator.push(
           context,
           MaterialPageRoute(
             builder: (context) => EscaneoScreen(
               cedulaUsuario: widget.cedulaUsuario,
-              idMazorcaSeguimiento: primeraDeteccion.idMazorca,
+              idMazorcaSeguimiento: detecciones.first.idMazorca,
               grupoImagenSeguimiento: grupoImagen,
             ),
           ),
@@ -317,9 +286,7 @@ class _HistorialScreenState extends State<HistorialScreen> {
         });
       }
     } catch (e) {
-      if (!_disposed && mounted) {
-        _mostrarError('Error: $e');
-      }
+      if (!_disposed && mounted) _mostrarError('Error: $e');
     }
   }
 
@@ -363,7 +330,6 @@ class _HistorialScreenState extends State<HistorialScreen> {
         actions: [
           IconButton(
             icon: Icon(_modoOnline ? Icons.cloud : Icons.cloud_off),
-            tooltip: _modoOnline ? 'Cambiar a Offline' : 'Cambiar a Online',
             onPressed: () {
               setState(() => _modoOnline = !_modoOnline);
               _cargarGruposImagenes();
@@ -475,12 +441,12 @@ class _TarjetaGrupoImagen extends StatelessWidget {
                       height: 180,
                       width: double.infinity,
                       fit: BoxFit.cover,
-                      placeholder: (context, url) => Container(
+                      placeholder: (c, u) => Container(
                         height: 180,
                         color: Colors.grey[200],
                         child: const Center(child: CircularProgressIndicator()),
                       ),
-                      errorWidget: (context, url, error) => Container(
+                      errorWidget: (c, u, e) => Container(
                         height: 180,
                         color: Colors.grey[200],
                         child: const Icon(Icons.broken_image, size: 50),
@@ -491,7 +457,7 @@ class _TarjetaGrupoImagen extends StatelessWidget {
                       height: 180,
                       width: double.infinity,
                       fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) => Container(
+                      errorBuilder: (c, e, s) => Container(
                         height: 180,
                         color: Colors.grey[200],
                         child: const Icon(Icons.broken_image, size: 50),
