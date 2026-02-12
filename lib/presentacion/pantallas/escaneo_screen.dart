@@ -6,9 +6,10 @@ import 'package:ultralytics_yolo/ultralytics_yolo.dart';
 import 'package:uuid/uuid.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import '../../logica/servicios/servicio_ia.dart';
 import '../../logica/servicios/servicio_gps.dart';
-import '../../logica/servicios/servicio_sincronizacion.dart';
 import '../../datos/local/base_datos_helper.dart';
 import '../../datos/modelos/deteccion.dart';
 import '../../config/constantes.dart';
@@ -35,7 +36,8 @@ class _EscaneoScreenState extends State<EscaneoScreen> {
   final ServicioIA _servicioIA = ServicioIA();
   final ServicioGPS _servicioGPS = ServicioGPS();
   final BaseDatosHelper _bd = BaseDatosHelper();
-  final ServicioSincronizacion _sincronizacion = ServicioSincronizacion();
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseStorage _storage = FirebaseStorage.instance;
 
   CameraController? _cameraController;
   List<CameraDescription>? _cameras;
@@ -45,6 +47,7 @@ class _EscaneoScreenState extends State<EscaneoScreen> {
 
   List<YOLOResult> _detecciones = [];
   double _fps = 0;
+  Size? _previewSize;
 
   bool get _esModoSeguimiento => widget.idMazorcaSeguimiento != null;
 
@@ -66,10 +69,11 @@ class _EscaneoScreenState extends State<EscaneoScreen> {
           enableAudio: false,
         );
         await _cameraController!.initialize();
+        _previewSize = _cameraController!.value.previewSize;
       }
 
       setState(() => _inicializado = true);
-      debugPrint('✅ Inicializado');
+      debugPrint('✅ Cámara y modelo inicializados');
     } catch (e) {
       debugPrint('❌ Error: $e');
       if (mounted) _mostrarMensaje('Error: $e');
@@ -98,15 +102,8 @@ class _EscaneoScreenState extends State<EscaneoScreen> {
         throw Exception('Cámara no disponible');
       }
 
-      final tempDir = await getTemporaryDirectory();
-      final timestamp = DateTime.now().millisecondsSinceEpoch;
-      final tempPath = '${tempDir.path}/capture_$timestamp.jpg';
-
       final imageFile = await _cameraController!.takePicture();
       final capturedFile = File(imageFile.path);
-      final tempFile = await capturedFile.copy(tempPath);
-
-      debugPrint('📸 Capturada: ${tempFile.path}');
 
       if (!mounted) return;
       Navigator.of(context).pop();
@@ -114,7 +111,7 @@ class _EscaneoScreenState extends State<EscaneoScreen> {
       _mostrarDialogoCarga('🎨 Dibujando...');
 
       final imagenAnotada = await _servicioIA.dibujarAnotacionesEnImagen(
-        imagenOriginal: tempFile,
+        imagenOriginal: capturedFile,
         detecciones: _detecciones,
       );
 
@@ -130,7 +127,8 @@ class _EscaneoScreenState extends State<EscaneoScreen> {
       );
 
       final directorioApp = await getApplicationDocumentsDirectory();
-      final nombreArchivo = 'deteccion_$timestamp.jpg';
+      final nombreArchivo =
+          'deteccion_${DateTime.now().millisecondsSinceEpoch}.jpg';
       final rutaDestino = '${directorioApp.path}/$nombreArchivo';
       final imagenFinal = await imagenAnotada.copy(rutaDestino);
 
@@ -140,7 +138,7 @@ class _EscaneoScreenState extends State<EscaneoScreen> {
       await _mostrarDialogoGuardar(imagenFinal, coordenadas, direccion);
 
       try {
-        await tempFile.delete();
+        await capturedFile.delete();
         await imagenAnotada.delete();
       } catch (e) {
         debugPrint('⚠️ Error limpiando: $e');
@@ -163,117 +161,23 @@ class _EscaneoScreenState extends State<EscaneoScreen> {
     final controladorLote = TextEditingController();
     final controladorNotas = TextEditingController();
 
-    final todasDetecciones = _servicioIA.procesarResultadosYOLO(_detecciones);
-    final totalDetecciones = todasDetecciones.length;
-
-    final titulo = _esModoSeguimiento
-        ? 'Guardar Seguimiento'
-        : 'Guardar $totalDetecciones Detección${totalDetecciones > 1 ? 'es' : ''}';
-
-    final mensaje = _esModoSeguimiento
-        ? 'Se agregarán $totalDetecciones nuevo(s) registro(s)'
-        : 'Se detectaron $totalDetecciones mazorca${totalDetecciones > 1 ? 's' : ''}';
+    final totalDetecciones = _detecciones.length;
 
     final resultado = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
-        title: Text(titulo),
+        title: Text(
+          _esModoSeguimiento ? 'Guardar Seguimiento' : 'Guardar Detecciones',
+        ),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: _esModoSeguimiento
-                      ? Colors.blue.shade50
-                      : TemaApp.verdeClaro.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: _esModoSeguimiento
-                        ? Colors.blue.shade200
-                        : TemaApp.verdeSecundario,
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(
-                          _esModoSeguimiento ? Icons.timeline : Icons.eco,
-                          color: _esModoSeguimiento
-                              ? Colors.blue.shade700
-                              : TemaApp.verdePrimario,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            mensaje,
-                            style: TextStyle(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 13,
-                              color: _esModoSeguimiento
-                                  ? Colors.blue.shade900
-                                  : TemaApp.verdePrimario,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    ...todasDetecciones.map((det) {
-                      final fase = det['fase'] as String;
-                      final confianza = det['confianza'] as double;
-                      final colorSemaforo = det['colorSemaforo'] as String;
-
-                      Color color;
-                      switch (colorSemaforo) {
-                        case 'verde':
-                          color = TemaApp.verdeSecundario;
-                          break;
-                        case 'amarillo':
-                          color = TemaApp.colorAdvertencia;
-                          break;
-                        case 'naranja':
-                          color = Colors.orange;
-                          break;
-                        default:
-                          color = Colors.grey;
-                      }
-
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 6),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 8,
-                              height: 8,
-                              decoration: BoxDecoration(
-                                color: color,
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                '${Constantes.obtenerNombreClase(fase)} (${(confianza * 100).toStringAsFixed(0)}%)',
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    }),
-                  ],
-                ),
+              Text(
+                '$totalDetecciones detección${totalDetecciones > 1 ? 'es' : ''}',
+                style: const TextStyle(fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 16),
               TextField(
@@ -379,7 +283,7 @@ class _EscaneoScreenState extends State<EscaneoScreen> {
         await _bd.insertarDeteccion(deteccion);
       }
 
-      debugPrint('✅ ${_detecciones.length} guardadas');
+      debugPrint('✅ ${_detecciones.length} guardadas en SQLite');
 
       if (!mounted) return;
       Navigator.of(context).pop();
@@ -387,16 +291,23 @@ class _EscaneoScreenState extends State<EscaneoScreen> {
       if (userAuth != null) {
         _mostrarDialogoCarga('☁️ Sincronizando...');
         try {
-          await _sincronizacion.sincronizarTodo();
-          debugPrint('✅ Sincronizado');
+          await _subirAFirebase(
+            imagenFile,
+            grupoImagen,
+            coordenadas,
+            direccion,
+            lote,
+            notas,
+          );
+
           if (!mounted) return;
           Navigator.of(context).pop();
           _mostrarMensaje('✅ Guardado y sincronizado');
         } catch (e) {
-          debugPrint('⚠️ Error sync: $e');
+          debugPrint('⚠️ Error Firebase: $e');
           if (!mounted) return;
           Navigator.of(context).pop();
-          _mostrarMensaje('✅ Guardado. Sincronizará después');
+          _mostrarMensaje('✅ Guardado localmente');
         }
       } else {
         _mostrarMensaje('✅ Guardado localmente');
@@ -416,6 +327,71 @@ class _EscaneoScreenState extends State<EscaneoScreen> {
       debugPrint('$stackTrace');
       if (mounted) Navigator.of(context).pop();
       _mostrarMensaje('❌ Error: $e');
+    }
+  }
+
+  Future<void> _subirAFirebase(
+    File imagenFile,
+    String grupoImagen,
+    Map<String, double> coordenadas,
+    String? direccion,
+    String lote,
+    String notas,
+  ) async {
+    try {
+      final userAuth = FirebaseAuth.instance.currentUser;
+      if (userAuth == null) throw Exception('No autenticado');
+
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final storageRef = _storage.ref().child(
+        'detecciones/${userAuth.uid}/${grupoImagen}_$timestamp.jpg',
+      );
+
+      await storageRef.putFile(imagenFile);
+      final imagenUrl = await storageRef.getDownloadURL();
+
+      debugPrint('✅ Imagen subida: $imagenUrl');
+
+      for (var i = 0; i < _detecciones.length; i++) {
+        final result = _detecciones[i];
+        final severidad = Constantes.obtenerSeveridadPorClase(result.className);
+        final colorSemaforo = Constantes.obtenerColorSemaforo(severidad);
+
+        final data = {
+          'idMazorca': widget.idMazorcaSeguimiento ?? const Uuid().v4(),
+          'grupoImagen': grupoImagen,
+          'idUsuario': widget.cedulaUsuario,
+          'workerId': userAuth.uid,
+          'fase': result.className,
+          'confianza': result.confidence,
+          'severidad': severidad,
+          'colorSemaforo': colorSemaforo,
+          'imagenUrl': imagenUrl,
+          'timestamp': FieldValue.serverTimestamp(),
+          'latitud': coordenadas['latitud']!,
+          'longitud': coordenadas['longitud']!,
+          'direccion': direccion,
+          'lote': lote.isNotEmpty ? lote : null,
+          'notas': notas.isNotEmpty ? notas : null,
+        };
+
+        await _firestore.collection('detecciones').add(data);
+      }
+
+      debugPrint('✅ Firestore actualizado');
+
+      final deteccionesLocales = await _bd.obtenerDeteccionesPorGrupo(
+        grupoImagen,
+      );
+      for (final det in deteccionesLocales) {
+        await _bd.actualizarDeteccion(
+          det.copyWith(sincronizado: true, rutaImagen: imagenUrl),
+        );
+      }
+    } catch (e, stackTrace) {
+      debugPrint('❌ Error Firebase: $e');
+      debugPrint('$stackTrace');
+      rethrow;
     }
   }
 
@@ -511,22 +487,29 @@ class _EscaneoScreenState extends State<EscaneoScreen> {
       ),
       body: Stack(
         children: [
-          // YOLOView con detección en tiempo real
           Positioned.fill(
             child: YOLOView(
               modelPath: Constantes.rutaModelo,
               task: YOLOTask.detect,
               confidenceThreshold: Constantes.umbralConfianza,
               iouThreshold: Constantes.umbralIoU,
-              showOverlays: true,
+              showOverlays: false,
               onResult: _onDeteccionesRecibidas,
               onPerformanceMetrics: (metrics) {
                 if (mounted) setState(() => _fps = metrics.fps);
               },
             ),
           ),
-
-          // Contador
+          if (_detecciones.isNotEmpty && _previewSize != null)
+            Positioned.fill(
+              child: CustomPaint(
+                painter: YOLOOverlayPainter(
+                  detecciones: _detecciones,
+                  previewSize: _previewSize!,
+                  screenSize: MediaQuery.of(context).size,
+                ),
+              ),
+            ),
           if (_detecciones.isNotEmpty)
             Positioned(
               top: 16,
@@ -564,8 +547,6 @@ class _EscaneoScreenState extends State<EscaneoScreen> {
                 ),
               ),
             ),
-
-          // Botón captura
           Positioned(
             bottom: 32,
             left: 0,
@@ -607,4 +588,98 @@ class _EscaneoScreenState extends State<EscaneoScreen> {
       ),
     );
   }
+}
+
+class YOLOOverlayPainter extends CustomPainter {
+  final List<YOLOResult> detecciones;
+  final Size previewSize;
+  final Size screenSize;
+
+  YOLOOverlayPainter({
+    required this.detecciones,
+    required this.previewSize,
+    required this.screenSize,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    for (final deteccion in detecciones) {
+      final box = deteccion.boundingBox;
+      final scaleX = size.width / previewSize.width;
+      final scaleY = size.height / previewSize.height;
+
+      final rect = Rect.fromLTRB(
+        box.left * scaleX,
+        box.top * scaleY,
+        box.right * scaleX,
+        box.bottom * scaleY,
+      );
+
+      final severidad = Constantes.obtenerSeveridadPorClase(
+        deteccion.className,
+      );
+      final color = _getColorPorSeveridad(severidad);
+
+      final paint = Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3.0;
+      canvas.drawRect(rect, paint);
+
+      final nombreClase = Constantes.obtenerNombreClase(deteccion.className);
+      final porcentaje = '${(deteccion.confidence * 100).toStringAsFixed(0)}%';
+      final texto = '$nombreClase $porcentaje';
+
+      final textPainter = TextPainter(
+        text: TextSpan(
+          text: texto,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      );
+      textPainter.layout();
+
+      final bgRect = Rect.fromLTWH(
+        rect.left,
+        rect.top - 24,
+        textPainter.width + 8,
+        20,
+      );
+      canvas.drawRect(
+        bgRect,
+        Paint()..color = Colors.black.withValues(alpha: 0.7),
+      );
+      canvas.drawRect(
+        bgRect,
+        Paint()
+          ..color = color
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2,
+      );
+      textPainter.paint(canvas, Offset(rect.left + 4, rect.top - 22));
+    }
+  }
+
+  Color _getColorPorSeveridad(int severidad) {
+    switch (severidad) {
+      case 0:
+        return const Color(0xFF4CAF50);
+      case 1:
+        return const Color(0xFFFFC107);
+      case 2:
+        return const Color(0xFFFF9800);
+      case 3:
+        return const Color(0xFFF44336);
+      default:
+        return const Color(0xFF9E9E9E);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant YOLOOverlayPainter oldDelegate) =>
+      detecciones != oldDelegate.detecciones;
 }
