@@ -8,16 +8,12 @@ import 'package:tflite_flutter/tflite_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 import '../../config/constantes.dart';
 
-/// Servicio de IA para detección de Moniliasis con YOLO26
 class ServicioIA {
   static Interpreter? _interpreter;
   bool _modeloCargado = false;
 
   bool get modeloCargado => _modeloCargado;
 
-  // ═══════════════════════════════════════════════════════
-  // CARGAR MODELO
-  // ═══════════════════════════════════════════════════════
   Future<void> cargarModelo() async {
     if (_modeloCargado && _interpreter != null) {
       debugPrint('✅ Modelo ya cargado');
@@ -31,16 +27,13 @@ class ServicioIA {
         options: InterpreterOptions()..threads = 4,
       );
       _modeloCargado = true;
-      debugPrint('✅ Modelo cargado');
+      debugPrint('✅ Modelo TFLite cargado');
     } catch (e) {
       debugPrint('❌ Error cargando modelo: $e');
       _modeloCargado = false;
     }
   }
 
-  // ═══════════════════════════════════════════════════════
-  // DETECTAR EN IMAGEN (PARA SUBIR IMAGEN / DIAGNÓSTICO)
-  // ═══════════════════════════════════════════════════════
   Future<List<Map<String, dynamic>>> detectarEnImagen({
     required File archivo,
   }) async {
@@ -54,9 +47,7 @@ class ServicioIA {
       final bytes = await archivo.readAsBytes();
       final image = img.decodeImage(bytes);
 
-      if (image == null) {
-        throw Exception('No se pudo decodificar la imagen');
-      }
+      if (image == null) throw Exception('No se pudo decodificar la imagen');
 
       final resized = img.copyResize(image, width: 640, height: 640);
       final inputBytes = _imageToByteListFloat32(resized, 640, 640);
@@ -149,11 +140,9 @@ class ServicioIA {
   List<Map<String, dynamic>> _applyNMS(List<Map<String, dynamic>> boxes) {
     if (boxes.isEmpty) return [];
 
-    boxes.sort((a, b) {
-      final confA = a['confianza'] as double;
-      final confB = b['confianza'] as double;
-      return confB.compareTo(confA);
-    });
+    boxes.sort(
+      (a, b) => (b['confianza'] as double).compareTo(a['confianza'] as double),
+    );
 
     final selected = <Map<String, dynamic>>[];
     final suppressed = List.filled(boxes.length, false);
@@ -165,9 +154,7 @@ class ServicioIA {
       for (int j = i + 1; j < boxes.length; j++) {
         if (suppressed[j]) continue;
         final iou = _calculateIoU(boxes[i]['box'], boxes[j]['box']);
-        if (iou > Constantes.umbralIoU) {
-          suppressed[j] = true;
-        }
+        if (iou > Constantes.umbralIoU) suppressed[j] = true;
       }
     }
 
@@ -193,7 +180,6 @@ class ServicioIA {
     final interArea =
         (xi2 - xi1).clamp(0, double.infinity) *
         (yi2 - yi1).clamp(0, double.infinity);
-
     final box1Area = (x2 - x1) * (y2 - y1);
     final box2Area = (x2b - x1b) * (y2b - y1b);
     final unionArea = box1Area + box2Area - interArea;
@@ -201,9 +187,6 @@ class ServicioIA {
     return interArea / unionArea;
   }
 
-  // ═══════════════════════════════════════════════════════
-  // PROCESAR RESULTADOS YOLO (TIEMPO REAL)
-  // ═══════════════════════════════════════════════════════
   List<Map<String, dynamic>> procesarResultadosYOLO(List<YOLOResult> results) {
     final detecciones = <Map<String, dynamic>>[];
 
@@ -234,9 +217,6 @@ class ServicioIA {
     return detecciones;
   }
 
-  // ═══════════════════════════════════════════════════════
-  // PROCESAR DETECCIÓN INDIVIDUAL
-  // ═══════════════════════════════════════════════════════
   Map<String, dynamic> procesarDeteccion(Map<String, dynamic> deteccion) {
     final fase = deteccion['fase'] as String? ?? deteccion['tag'] as String;
     final confianza =
@@ -252,9 +232,6 @@ class ServicioIA {
     };
   }
 
-  // ═══════════════════════════════════════════════════════
-  // DIBUJAR ANOTACIONES EN IMAGEN (YOLO RESULTS)
-  // ═══════════════════════════════════════════════════════
   Future<File> dibujarAnotacionesEnImagen({
     required File imagenOriginal,
     required List<YOLOResult> detecciones,
@@ -265,9 +242,7 @@ class ServicioIA {
       final bytes = await imagenOriginal.readAsBytes();
       final imagen = img.decodeImage(bytes);
 
-      if (imagen == null) {
-        throw Exception('No se pudo decodificar la imagen');
-      }
+      if (imagen == null) throw Exception('No se pudo decodificar la imagen');
 
       for (final deteccion in detecciones) {
         final box = deteccion.boundingBox;
@@ -315,9 +290,6 @@ class ServicioIA {
     }
   }
 
-  // ═══════════════════════════════════════════════════════
-  // DIBUJAR ANOTACIONES EN IMAGEN (MAP)
-  // ═══════════════════════════════════════════════════════
   Future<File> dibujarAnotacionesEnImagenMap({
     required File imagenOriginal,
     required List<Map<String, dynamic>> detecciones,
@@ -328,9 +300,7 @@ class ServicioIA {
       final bytes = await imagenOriginal.readAsBytes();
       final imagen = img.decodeImage(bytes);
 
-      if (imagen == null) {
-        throw Exception('No se pudo decodificar la imagen');
-      }
+      if (imagen == null) throw Exception('No se pudo decodificar la imagen');
 
       for (final deteccion in detecciones) {
         final box = (deteccion['box'] as List).cast<double>();
@@ -416,7 +386,6 @@ class ServicioIA {
       y2: yT + altoTexto,
       color: img.ColorRgb8(0, 0, 0),
     );
-
     img.drawRect(
       imagen,
       x1: xT,
@@ -426,7 +395,6 @@ class ServicioIA {
       color: color,
       thickness: 2,
     );
-
     img.drawString(
       imagen,
       texto,
