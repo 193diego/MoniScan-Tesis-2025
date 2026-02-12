@@ -121,4 +121,7 @@ class Deteccion {
       sincronizado: (map['sincronizado'] as int) == 1,
     );
   }
+
+  // Alias para compatibilidad con código existente que usa desdeMap
+  static Deteccion desdeMap(Map<String, dynamic> map) => Deteccion.fromMap(map);
 }
