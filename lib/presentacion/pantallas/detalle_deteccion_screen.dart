@@ -41,7 +41,6 @@ class _DetalleDeteccionScreenState extends State<DetalleDeteccionScreen> {
 
     try {
       final conectividad = await Connectivity().checkConnectivity();
-      // CORREGIDO: checkConnectivity() devuelve ConnectivityResult (NO lista)
       final tieneInternet = conectividad != ConnectivityResult.none;
 
       if (tieneInternet && _modoOnline) {
@@ -193,8 +192,8 @@ class _DetalleDeteccionScreenState extends State<DetalleDeteccionScreen> {
                             fontWeight: FontWeight.bold,
                           ),
                         ),
-                        ...(_detecciones.map((det) {
-                          return ListTile(
+                        ..._detecciones.map(
+                          (det) => ListTile(
                             title: Text(det.fase),
                             subtitle: Text(
                               '${(det.confianza * 100).toStringAsFixed(0)}%',
@@ -202,8 +201,8 @@ class _DetalleDeteccionScreenState extends State<DetalleDeteccionScreen> {
                             leading: CircleAvatar(
                               child: Text('${det.severidad}'),
                             ),
-                          );
-                        })),
+                          ),
+                        ),
                       ],
                     ),
                   ),
