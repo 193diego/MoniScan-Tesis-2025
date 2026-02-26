@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:elegant_nav_bar/elegant_nav_bar.dart';
 import '../../logica/servicios/servicio_conectividad.dart';
 import 'inicio_screen.dart';
-import 'historial_screen.dart';
+import 'seguimiento_screen.dart';
 import 'mapa_screen.dart';
 import 'perfil_screen.dart';
 
@@ -30,12 +30,13 @@ class _HomeScreenState extends State<HomeScreen>
     _pageController = PageController(initialPage: _indiceActual);
     _pantallas = [
       InicioScreen(cedulaUsuario: widget.cedulaUsuario),
-      HistorialScreen(cedulaUsuario: widget.cedulaUsuario),
+      SeguimientoScreen(
+        cedulaUsuario: widget.cedulaUsuario,
+      ), // ← Seguimiento en lugar de Historial
       MapaScreen(cedulaUsuario: widget.cedulaUsuario),
       PerfilScreen(cedulaUsuario: widget.cedulaUsuario),
     ];
 
-    // Escuchar cambios de conectividad
     _conectividad.estadoConexion.listen((conectado) {
       if (mounted) {
         setState(() {
@@ -70,15 +71,11 @@ class _HomeScreenState extends State<HomeScreen>
     return Scaffold(
       body: Column(
         children: [
-          /// Banner de conexión MEJORADO
           if (!_estaConectado) _construirBannerOffline(),
-
-          /// Contenido principal
           Expanded(
             child: PageView(
               controller: _pageController,
               onPageChanged: _onPageChanged,
-              // CRÍTICO: Deshabilitar swipe en mapa (índice 2)
               physics: _indiceActual == 2
                   ? const NeverScrollableScrollPhysics()
                   : const BouncingScrollPhysics(),
@@ -99,9 +96,9 @@ class _HomeScreenState extends State<HomeScreen>
             ),
           ),
           NavigationItem(
-            label: 'Historial',
+            label: 'Seguimiento',
             iconWidget: Icon(
-              _indiceActual == 1 ? Icons.history : Icons.history_outlined,
+              _indiceActual == 1 ? Icons.timeline : Icons.timeline_outlined,
               size: _indiceActual == 1 ? 28 : 24,
             ),
           ),
@@ -129,7 +126,6 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  /// Widget de banner offline mejorado
   Widget _construirBannerOffline() {
     return Container(
       width: double.infinity,

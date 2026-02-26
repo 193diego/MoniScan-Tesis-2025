@@ -1,4 +1,5 @@
 // lib/datos/local/base_datos_helper.dart
+// ✅ SCHEMA COMPATIBLE CON TU MODELO ACTUAL
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'package:flutter/foundation.dart';
@@ -11,7 +12,6 @@ class BaseDatosHelper {
   static Database? _database;
 
   factory BaseDatosHelper() => _instance;
-
   BaseDatosHelper._internal();
 
   Future<Database> get database async {
@@ -24,17 +24,16 @@ class BaseDatosHelper {
     String path = join(await getDatabasesPath(), Constantes.nombreBaseDatos);
     return await openDatabase(
       path,
-      version: 3, // ← VERSIÓN 3 para forzar nueva migración
+      version: 6, // ✅ VERSIÓN 6
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
   }
 
-  /// Crear base de datos (primera vez)
   Future<void> _onCreate(Database db, int version) async {
     debugPrint('🔨 Creando base de datos versión $version');
 
-    // Tabla USUARIOS con TODOS los campos necesarios
+    // Tabla USUARIOS
     await db.execute('''
       CREATE TABLE ${Constantes.tablaUsuarios} (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,82 +50,84 @@ class BaseDatosHelper {
       )
     ''');
 
-    // Tabla DETECCIONES
+    // Tabla DETECCIONES - ✅ NOMBRES QUE USA TU MODELO
     await db.execute('''
       CREATE TABLE ${Constantes.tablaDetecciones} (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        id_mazorca TEXT NOT NULL,
-        grupo_imagen TEXT,
-        id_usuario TEXT NOT NULL,
-        worker_id TEXT,
+        idMazorca TEXT,
+        grupoImagen TEXT,
+        idUsuario TEXT NOT NULL,
+        workerId TEXT,
         fase TEXT NOT NULL,
         confianza REAL NOT NULL,
         severidad INTEGER NOT NULL,
-        color_semaforo TEXT NOT NULL,
-        ruta_imagen TEXT NOT NULL,
+        colorSemaforo TEXT NOT NULL,
+        rutaImagen TEXT NOT NULL,
+        fecha TEXT NOT NULL,
         latitud REAL,
         longitud REAL,
         direccion TEXT,
         lote TEXT,
         notas TEXT,
-        fecha TEXT NOT NULL,
-        sincronizado INTEGER DEFAULT 0
+        sincronizado INTEGER DEFAULT 0,
+        loteId TEXT,
+        enSeguimiento INTEGER DEFAULT 0,
+        tratamientoId TEXT,
+        precisionGPS REAL
       )
     ''');
 
-    debugPrint('✅ Base de datos creada exitosamente');
+    await db.execute('''
+      CREATE INDEX idx_detecciones_usuario ON ${Constantes.tablaDetecciones}(idUsuario)
+    ''');
+
+    await db.execute('''
+      CREATE INDEX idx_detecciones_sincronizado ON ${Constantes.tablaDetecciones}(sincronizado)
+    ''');
+
+    debugPrint('✅ Base de datos creada');
   }
 
-  /// Migrar base de datos
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    debugPrint('🔄 Migrando base de datos de v$oldVersion a v$newVersion');
+    debugPrint('🔄 Migrando de v$oldVersion a v$newVersion');
 
-    // ==================== MIGRACIÓN v1 → v2 ====================
-    if (oldVersion < 2) {
-      await _agregarColumna(db, Constantes.tablaUsuarios, 'nombres', 'TEXT');
-      await _agregarColumna(db, Constantes.tablaUsuarios, 'apellidos', 'TEXT');
-      await _agregarColumna(db, Constantes.tablaUsuarios, 'correo', 'TEXT');
-      await _agregarColumna(db, Constantes.tablaUsuarios, 'telefono', 'TEXT');
-    }
+    await db.execute('DROP TABLE IF EXISTS ${Constantes.tablaDetecciones}');
 
-    // ==================== MIGRACIÓN v2 → v3 ====================
-    if (oldVersion < 3) {
-      await _agregarColumna(db, Constantes.tablaUsuarios, 'ruta_foto', 'TEXT');
-      await _agregarColumna(db, Constantes.tablaUsuarios, 'rol', 'TEXT');
-      await _agregarColumna(
-        db,
-        Constantes.tablaUsuarios,
-        'fecha_registro',
-        'TEXT',
-      );
-      await _agregarColumna(
-        db,
-        Constantes.tablaUsuarios,
-        'fecha_actualizacion',
-        'TEXT',
-      );
-    }
+    await db.execute('''
+      CREATE TABLE ${Constantes.tablaDetecciones} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        idMazorca TEXT,
+        grupoImagen TEXT,
+        idUsuario TEXT NOT NULL,
+        workerId TEXT,
+        fase TEXT NOT NULL,
+        confianza REAL NOT NULL,
+        severidad INTEGER NOT NULL,
+        colorSemaforo TEXT NOT NULL,
+        rutaImagen TEXT NOT NULL,
+        fecha TEXT NOT NULL,
+        latitud REAL,
+        longitud REAL,
+        direccion TEXT,
+        lote TEXT,
+        notas TEXT,
+        sincronizado INTEGER DEFAULT 0,
+        loteId TEXT,
+        enSeguimiento INTEGER DEFAULT 0,
+        tratamientoId TEXT,
+        precisionGPS REAL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE INDEX idx_detecciones_usuario ON ${Constantes.tablaDetecciones}(idUsuario)
+    ''');
+
+    await db.execute('''
+      CREATE INDEX idx_detecciones_sincronizado ON ${Constantes.tablaDetecciones}(sincronizado)
+    ''');
 
     debugPrint('✅ Migración completada');
-  }
-
-  /// Helper para agregar columnas de forma segura
-  Future<void> _agregarColumna(
-    Database db,
-    String tabla,
-    String columna,
-    String tipo,
-  ) async {
-    try {
-      await db.execute('ALTER TABLE $tabla ADD COLUMN $columna $tipo');
-      debugPrint('✅ Columna "$columna" agregada a tabla "$tabla"');
-    } catch (e) {
-      if (e.toString().contains('duplicate column')) {
-        debugPrint('⚠️ Columna "$columna" ya existe en tabla "$tabla"');
-      } else {
-        debugPrint('❌ Error agregando columna "$columna": $e');
-      }
-    }
   }
 
   // ==================== USUARIOS ====================
@@ -141,19 +142,17 @@ class BaseDatosHelper {
       );
     } catch (e) {
       debugPrint('❌ Error insertando usuario: $e');
-      debugPrint('📋 Datos del usuario: ${usuario.toMap()}');
       rethrow;
     }
   }
 
   Future<Usuario?> obtenerUsuarioPorCedula(String cedula) async {
     final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
+    final maps = await db.query(
       Constantes.tablaUsuarios,
       where: 'cedula = ?',
       whereArgs: [cedula],
     );
-
     if (maps.isNotEmpty) {
       return Usuario.desdeMap(maps.first);
     }
@@ -181,45 +180,20 @@ class BaseDatosHelper {
 
   // ==================== DETECCIONES ====================
 
-  // CORREGIR insertarDeteccion para evitar conflicto de ID
   Future<int> insertarDeteccion(Deteccion deteccion) async {
     final db = await database;
-
     try {
-      // CRÍTICO: Verificar si ya existe por idMazorca Y grupoImagen
-      final existing = await db.query(
+      final mapa = deteccion.toMap();
+      mapa.remove('id');
+
+      final id = await db.insert(
         Constantes.tablaDetecciones,
-        where: 'id_mazorca = ? AND grupo_imagen = ?',
-        whereArgs: [deteccion.idMazorca, deteccion.grupoImagen],
+        mapa,
+        conflictAlgorithm: ConflictAlgorithm.replace,
       );
 
-      if (existing.isNotEmpty) {
-        // SI EXISTE: Actualizar usando el ID existente
-        final idExistente = existing.first['id'] as int;
-
-        // CREAR MAPA SIN EL CAMPO 'id' para evitar conflicto
-        final mapaActualizacion = deteccion.toMap();
-        mapaActualizacion.remove('id'); // ELIMINAR ID del mapa
-
-        return await db.update(
-          Constantes.tablaDetecciones,
-          mapaActualizacion,
-          where: 'id = ?',
-          whereArgs: [idExistente],
-        );
-      } else {
-        // SI NO EXISTE: Insertar nuevo (sin especificar ID)
-        final mapaInsercion = deteccion.toMap();
-        mapaInsercion.remove(
-          'id',
-        ); // DEJAR que SQLite genere el ID automáticamente
-
-        return await db.insert(
-          Constantes.tablaDetecciones,
-          mapaInsercion,
-          conflictAlgorithm: ConflictAlgorithm.replace,
-        );
-      }
+      debugPrint('✅ Detección insertada con ID: $id');
+      return id;
     } catch (e) {
       debugPrint('❌ Error insertando detección: $e');
       debugPrint('📋 Datos: ${deteccion.toMap()}');
@@ -229,75 +203,55 @@ class BaseDatosHelper {
 
   Future<List<Deteccion>> obtenerDeteccionesPorGrupo(String grupoImagen) async {
     final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
+    final maps = await db.query(
       Constantes.tablaDetecciones,
-      where: 'grupo_imagen = ?',
+      where: 'grupoImagen = ?',
       whereArgs: [grupoImagen],
       orderBy: 'fecha DESC',
     );
-
-    return List.generate(maps.length, (i) => Deteccion.desdeMap(maps[i]));
+    return maps.map((m) => Deteccion.fromMap(m)).toList();
   }
 
   Future<List<Deteccion>> obtenerDeteccionesPorMazorca(String idMazorca) async {
     final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
+    final maps = await db.query(
       Constantes.tablaDetecciones,
-      where: 'id_mazorca = ?',
+      where: 'idMazorca = ?',
       whereArgs: [idMazorca],
       orderBy: 'fecha DESC',
     );
-
-    return List.generate(maps.length, (i) => Deteccion.desdeMap(maps[i]));
+    return maps.map((m) => Deteccion.fromMap(m)).toList();
   }
 
   Future<List<Deteccion>> obtenerTodasDetecciones(String idUsuario) async {
     final db = await database;
-    final res = await db.query(
+    final maps = await db.query(
       Constantes.tablaDetecciones,
-      where: 'id_usuario = ?',
+      where: 'idUsuario = ?',
       whereArgs: [idUsuario],
       orderBy: 'fecha DESC',
     );
-
-    return res.map(Deteccion.desdeMap).toList();
+    return maps.map((m) => Deteccion.fromMap(m)).toList();
   }
 
-  Future<List<Map<String, dynamic>>> obtenerGruposImagenes(
-    String idUsuario,
-  ) async {
+  Future<List<Deteccion>> obtenerDeteccionesNoSincronizadas() async {
     final db = await database;
-
-    final detecciones = await db.query(
+    final maps = await db.query(
       Constantes.tablaDetecciones,
-      where: 'id_usuario = ?',
-      whereArgs: [idUsuario],
-      orderBy: 'fecha DESC',
+      where: 'sincronizado = ?',
+      whereArgs: [0],
     );
+    return maps.map((m) => Deteccion.fromMap(m)).toList();
+  }
 
-    final Map<String, Map<String, dynamic>> gruposMap = {};
-
-    for (var deteccion in detecciones) {
-      final grupoImagen = deteccion['grupo_imagen'] as String?;
-      if (grupoImagen == null || grupoImagen.isEmpty) continue;
-
-      if (!gruposMap.containsKey(grupoImagen)) {
-        gruposMap[grupoImagen] = {
-          'grupoImagen': grupoImagen,
-          'imagenUrl': deteccion['ruta_imagen'],
-          'timestamp': deteccion['fecha'],
-          'totalDetecciones': 1,
-          'lote': deteccion['lote'],
-          'latitud': deteccion['latitud'],
-          'longitud': deteccion['longitud'],
-        };
-      } else {
-        gruposMap[grupoImagen]!['totalDetecciones'] =
-            (gruposMap[grupoImagen]!['totalDetecciones'] as int) + 1;
-      }
-    }
-
-    return gruposMap.values.toList();
+  Future<int> marcarComoSincronizado(int id) async {
+    final db = await database;
+    return await db.update(
+      Constantes.tablaDetecciones,
+      {'sincronizado': 1},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   Future<int> actualizarDeteccion(Deteccion deteccion) async {
@@ -307,16 +261,6 @@ class BaseDatosHelper {
       deteccion.toMap(),
       where: 'id = ?',
       whereArgs: [deteccion.id],
-    );
-  }
-
-  Future<int> actualizarRutaImagen(int id, String nuevaRuta) async {
-    final db = await database;
-    return await db.update(
-      Constantes.tablaDetecciones,
-      {'ruta_imagen': nuevaRuta, 'sincronizado': 1},
-      where: 'id = ?',
-      whereArgs: [id],
     );
   }
 
@@ -333,7 +277,7 @@ class BaseDatosHelper {
     final db = await database;
     return await db.delete(
       Constantes.tablaDetecciones,
-      where: 'grupo_imagen = ?',
+      where: 'grupoImagen = ?',
       whereArgs: [grupoImagen],
     );
   }
@@ -342,40 +286,64 @@ class BaseDatosHelper {
     final db = await database;
     return await db.delete(
       Constantes.tablaDetecciones,
-      where: 'id_mazorca = ?',
+      where: 'idMazorca = ?',
       whereArgs: [idMazorca],
     );
   }
 
-  Future<List<Deteccion>> obtenerDeteccionesNoSincronizadas() async {
-    final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      Constantes.tablaDetecciones,
-      where: 'sincronizado = ?',
-      whereArgs: [0],
-    );
-
-    return List.generate(maps.length, (i) => Deteccion.desdeMap(maps[i]));
-  }
-
-  Future<int> marcarComoSincronizado(int id) async {
+  Future<int> actualizarRutaImagen(int id, String nuevaRuta) async {
     final db = await database;
     return await db.update(
       Constantes.tablaDetecciones,
-      {'sincronizado': 1},
+      {'rutaImagen': nuevaRuta, 'sincronizado': 1},
       where: 'id = ?',
       whereArgs: [id],
     );
+  }
+
+  Future<List<Map<String, dynamic>>> obtenerGruposImagenes(
+    String idUsuario,
+  ) async {
+    final db = await database;
+    final detecciones = await db.query(
+      Constantes.tablaDetecciones,
+      where: 'idUsuario = ?',
+      whereArgs: [idUsuario],
+      orderBy: 'fecha DESC',
+    );
+
+    final Map<String, Map<String, dynamic>> gruposMap = {};
+
+    for (var deteccion in detecciones) {
+      final grupoId =
+          deteccion['grupoImagen'] as String? ?? 'grupo_${deteccion['id']}';
+
+      if (!gruposMap.containsKey(grupoId)) {
+        gruposMap[grupoId] = {
+          'grupoImagen': grupoId,
+          'imagenUrl': deteccion['rutaImagen'],
+          'timestamp': deteccion['fecha'],
+          'totalDetecciones': 1,
+          'lote': deteccion['lote'],
+          'latitud': deteccion['latitud'],
+          'longitud': deteccion['longitud'],
+        };
+      } else {
+        gruposMap[grupoId]!['totalDetecciones'] =
+            (gruposMap[grupoId]!['totalDetecciones'] as int) + 1;
+      }
+    }
+
+    return gruposMap.values.toList();
   }
 
   Future<void> limpiarDetecciones(String idUsuario) async {
     final db = await database;
     await db.delete(
       Constantes.tablaDetecciones,
-      where: 'id_usuario = ?',
+      where: 'idUsuario = ?',
       whereArgs: [idUsuario],
     );
-    debugPrint('🗑️ Detecciones locales limpiadas para usuario: $idUsuario');
   }
 
   // ==================== UTILIDADES ====================
@@ -387,27 +355,26 @@ class BaseDatosHelper {
   }
 
   Future<void> cerrarBaseDatos() async {
-    final db = await database;
-    await db.close();
+    if (_database != null) {
+      await _database!.close();
+      _database = null;
+    }
   }
 
-  /// MÉTODO DE EMERGENCIA: Recrear base de datos desde cero
   Future<void> recrearBaseDatos() async {
     try {
       final path = join(await getDatabasesPath(), Constantes.nombreBaseDatos);
-
       if (_database != null) {
         await _database!.close();
         _database = null;
       }
-
       await deleteDatabase(path);
-      debugPrint('🗑️ Base de datos eliminada: $path');
+      debugPrint('🗑️ Base de datos eliminada');
 
       _database = await _initDatabase();
-      debugPrint('✅ Base de datos recreada con esquema correcto');
+      debugPrint('✅ Base de datos recreada');
     } catch (e) {
-      debugPrint('❌ Error recreando base de datos: $e');
+      debugPrint('❌ Error recreando BD: $e');
       rethrow;
     }
   }

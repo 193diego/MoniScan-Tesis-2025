@@ -29,7 +29,7 @@ dependencies:
   
   # Visión Artificial - SOLUCIÓN MODERNA Y SIMPLE
   ultralytics_yolo: ^0.2.0
-  lite_vision_ai: ^1.0.1      # ← LIBRERÍA MODERNA (Nov 2024)
+  tflite_flutter: ^0.12.1
   image: ^4.2.0
   camera: ^0.11.0+2
   image_picker: ^1.1.2
@@ -65,4 +65,11 @@ flutter:
   assets:
     - assets/logo.png
     - assets/models/labels.txt
-    - assets/models/best_float32.tflite
+    - assets/models/best_320_float16.tflite
+    - assets/models/best_640_float16.tflite
+
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/logo.png"

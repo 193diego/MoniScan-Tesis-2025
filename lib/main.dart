@@ -1,3 +1,4 @@
+// lib/main.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -10,19 +11,15 @@ import 'logica/servicios/servicio_sincronizacion.dart';
 import 'utils/manejador_errores.dart';
 
 void main() async {
-  // Asegurar inicialización de Flutter
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Inicializar manejador de errores global
   ManejadorErrores.inicializar();
 
-  // Configurar orientación
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
   ]);
 
-  // Configurar barra de estado
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
@@ -32,7 +29,6 @@ void main() async {
     ),
   );
 
-  // Inicializar Firebase
   try {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
@@ -42,7 +38,6 @@ void main() async {
     debugPrint('❌ Error inicializando Firebase: $e');
   }
 
-  // Inicializar servicios globales
   try {
     await _inicializarServicios();
     debugPrint('✅ Servicios globales inicializados');
@@ -50,17 +45,13 @@ void main() async {
     debugPrint('❌ Error inicializando servicios: $e');
   }
 
-  // Ejecutar app
   runApp(const MoniScanApp());
 }
 
-/// Inicializar servicios globales
 Future<void> _inicializarServicios() async {
-  // Inicializar servicio de conectividad
   final conectividad = ServicioConectividad();
   await conectividad.inicializar();
 
-  // Inicializar sincronización automática
   final sincronizacion = ServicioSincronizacion();
   sincronizacion.inicializarSincronizacionAutomatica();
 
@@ -77,23 +68,19 @@ class MoniScanApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: TemaApp.obtenerTemaClaro(),
 
-      // Manejador global de navegación con errores
       builder: (context, child) {
-        // Configurar texto escalable
+        // ✅ CORRECCIÓN: textScaler reemplaza textScaleFactor (deprecated desde v3.12)
         return MediaQuery(
           data: MediaQuery.of(context).copyWith(
-            textScaleFactor: MediaQuery.of(
-              context,
-            ).textScaleFactor.clamp(0.8, 1.2),
+            textScaler: TextScaler.linear(
+              MediaQuery.of(context).textScaler.scale(1.0).clamp(0.8, 1.2),
+            ),
           ),
           child: child ?? const SizedBox(),
         );
       },
 
-      // Pantalla inicial
       home: const LoginFirebaseScreen(),
-
-      // Configuración de tema
       themeMode: ThemeMode.light,
     );
   }

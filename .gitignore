@@ -75,8 +75,6 @@ linux/flutter/ephemeral/
 macos/Flutter/ephemeral/
 windows/flutter/ephemeral/
 
-
-
 # ==============================
 # EDITORES
 # ==============================
@@ -89,8 +87,6 @@ windows/flutter/ephemeral/
 .DS_Store
 Thumbs.db
 
-
-
 # ==============================
 # FIREBASE - ARCHIVOS SENSIBLES
 # ==============================
@@ -98,3 +94,6 @@ android/app/google-services.json
 lib/firebase_options.dart
 .env
 *.env
+
+# FVM Version Cache
+.fvm/

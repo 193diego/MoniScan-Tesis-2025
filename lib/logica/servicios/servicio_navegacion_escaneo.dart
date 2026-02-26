@@ -1,6 +1,9 @@
 // lib/logica/servicios/servicio_navegacion_escaneo.dart
 import 'package:flutter/material.dart';
+// ✅ CORRECCIÓN: Solo se importa escaneo_screen.dart para EscaneoScreen
 import '../../presentacion/pantallas/escaneo_screen.dart';
+// ✅ CORRECCIÓN: escaneo_seguimiento_screen.dart es la ÚNICA fuente de EscaneoSeguimientoScreen
+// Esto elimina el error "ambiguous_import": EscaneoSeguimientoScreen ya NO existe en escaneo_screen.dart
 import '../../presentacion/pantallas/escaneo_seguimiento_screen.dart';
 
 /// Servicio para gestionar navegación unificada hacia pantallas de escaneo
@@ -22,17 +25,13 @@ class ServicioNavegacionEscaneo {
     double? latitudSugerida,
     double? longitudSugerida,
   }) async {
+    // ✅ CORRECCIÓN: EscaneoScreen es un StatefulWidget, se navega con builder
     await Navigator.push(
       context,
       MaterialPageRoute(
-        // ═══════════════════════════════════════════════════════
-        // CORREGIDO: EscaneoScreen NO requiere grupoImagen
-        // ═══════════════════════════════════════════════════════
         builder: (_) => EscaneoScreen(
-          cedulaUsuario: cedulaUsuario,
-          // ✅ Parámetros opcionales (pueden agregarse si se necesitan)
-          // idMazorcaSeguimiento: null,
-          // grupoImagenSeguimiento: null,
+          usuarioId: cedulaUsuario,
+          onVolverInicio: () => Navigator.of(context).pop(),
         ),
       ),
     );
@@ -49,18 +48,17 @@ class ServicioNavegacionEscaneo {
     required String cedulaUsuario,
     required String idMazorca,
     required String grupoImagen,
+    String? seguimientoId,
   }) async {
+    // ✅ CORRECCIÓN: EscaneoSeguimientoScreen es un StatefulWidget, se navega con builder
     return await Navigator.push<bool>(
       context,
       MaterialPageRoute(
-        // ═══════════════════════════════════════════════════════
-        // CORREGIDO: Constructor correcto de EscaneoSeguimientoScreen
-        // ═══════════════════════════════════════════════════════
         builder: (_) => EscaneoSeguimientoScreen(
           cedulaUsuario: cedulaUsuario,
           idMazorca: idMazorca,
           grupoImagen: grupoImagen,
-          // ❌ ELIMINADOS: lote y ultimaFase (no existen en constructor)
+          seguimientoId: seguimientoId,
         ),
       ),
     );
@@ -76,17 +74,17 @@ class ServicioNavegacionEscaneo {
     required double longitud,
     String? idMazorcaCercana,
     String? grupoImagen,
+    String? seguimientoId,
   }) async {
     if (idMazorcaCercana != null && grupoImagen != null) {
-      // Hay mazorca cercana: continuar seguimiento
       await continuarSeguimiento(
         context: context,
         cedulaUsuario: cedulaUsuario,
         idMazorca: idMazorcaCercana,
         grupoImagen: grupoImagen,
+        seguimientoId: seguimientoId,
       );
     } else {
-      // No hay mazorca cercana: nuevo escaneo
       await iniciarEscaneoNuevo(
         context: context,
         cedulaUsuario: cedulaUsuario,

@@ -1,3 +1,5 @@
+// lib/logica/servicios/servicio_gps.dart
+import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 import '../../config/constantes.dart';
@@ -30,19 +32,16 @@ class ServicioGPS {
   /// Obtener la ubicación actual del dispositivo
   Future<Position?> obtenerUbicacionActual() async {
     try {
-      // Verificar servicios
       final serviciosActivos = await serviciosHabilitados();
       if (!serviciosActivos) {
         throw Exception('Los servicios de ubicación están deshabilitados');
       }
 
-      // Verificar permisos
       final tienePermisos = await verificarPermisos();
       if (!tienePermisos) {
         throw Exception('No se otorgaron permisos de ubicación');
       }
 
-      // Obtener ubicación con precisión alta (COMPATIBLE geolocator ^12)
       final posicion = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
         timeLimit: const Duration(seconds: 10),
@@ -50,7 +49,8 @@ class ServicioGPS {
 
       return posicion;
     } catch (e) {
-      print('Error al obtener ubicación: $e');
+      // ✅ CORRECCIÓN: debugPrint reemplaza print() (avoid_print lint rule)
+      debugPrint('Error al obtener ubicación: $e');
       return null;
     }
   }
@@ -63,7 +63,6 @@ class ServicioGPS {
       return {'latitud': posicion.latitude, 'longitud': posicion.longitude};
     }
 
-    // Coordenadas por defecto (Guayaquil, Ecuador)
     return {
       'latitud': Constantes.latitudPorDefecto,
       'longitud': Constantes.longitudPorDefecto,
@@ -90,7 +89,8 @@ class ServicioGPS {
 
       return partesDireccion.join(', ');
     } catch (e) {
-      print('Error al obtener dirección: $e');
+      // ✅ CORRECCIÓN: debugPrint reemplaza print() (avoid_print lint rule)
+      debugPrint('Error al obtener dirección: $e');
       return null;
     }
   }

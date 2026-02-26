@@ -1,96 +1,214 @@
 // lib/logica/servicios/servicio_ia.dart
 import 'dart:io';
 import 'dart:typed_data';
-import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
-import 'package:ultralytics_yolo/ultralytics_yolo.dart';
-import 'package:tflite_flutter/tflite_flutter.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:tflite_flutter/tflite_flutter.dart';
+import 'package:ultralytics_yolo/ultralytics_yolo.dart';
 import '../../config/constantes.dart';
 
 class ServicioIA {
-  static Interpreter? _interpreter;
+  // ═══════════════════════════════════════════════════════
+  // ESTADO TFLITE
+  // ═══════════════════════════════════════════════════════
+  Interpreter? _interpreter;
   bool _modeloCargado = false;
-
   bool get modeloCargado => _modeloCargado;
 
+  // ✅ Usa el tamaño 640 definido en Constantes (análisis estático)
+  static const int _inputSize = Constantes.tamanoEntradaModelo; // 640
+
+  // ═══════════════════════════════════════════════════════
+  // CARGAR MODELO TFLITE (best_640_float16)
+  // ═══════════════════════════════════════════════════════
   Future<void> cargarModelo() async {
     if (_modeloCargado && _interpreter != null) {
-      debugPrint('✅ Modelo ya cargado');
+      debugPrint(
+        '✅ [ServicioIA] Modelo ya cargado ($_inputSize×$_inputSize float16)',
+      );
       return;
     }
-
     try {
-      debugPrint('🔄 Cargando modelo TFLite...');
+      debugPrint('🔄 [ServicioIA] Cargando modelo: ${Constantes.rutaModelo}');
+      debugPrint(
+        '   Tamaño entrada: ${_inputSize}×$_inputSize (máxima precisión)',
+      );
+
+      // ✅ Para float16 NO usamos NNAPI (puede dar conflictos)
+      // Usamos solo hilos de CPU que es más estable con float16
+      final options = InterpreterOptions()..threads = 4;
+
       _interpreter = await Interpreter.fromAsset(
         Constantes.rutaModelo,
-        options: InterpreterOptions()..threads = 4,
+        options: options,
       );
+
+      // ✅ Redimensionar tensor de entrada al tamaño correcto y asignar
+      _interpreter!.resizeInputTensor(0, [1, _inputSize, _inputSize, 3]);
+      _interpreter!.allocateTensors();
+
+      final inputTensors = _interpreter!.getInputTensors();
+      final outputTensors = _interpreter!.getOutputTensors();
+
+      debugPrint('✅ [ServicioIA] Modelo cargado y tensores asignados');
+      for (int i = 0; i < inputTensors.length; i++) {
+        debugPrint(
+          '   Input[$i]  shape: ${inputTensors[i].shape}  type: ${inputTensors[i].type}',
+        );
+      }
+      for (int i = 0; i < outputTensors.length; i++) {
+        debugPrint(
+          '   Output[$i] shape: ${outputTensors[i].shape} type: ${outputTensors[i].type}',
+        );
+      }
+
       _modeloCargado = true;
-      debugPrint('✅ Modelo TFLite cargado');
-    } catch (e) {
-      debugPrint('❌ Error cargando modelo: $e');
+    } catch (e, stack) {
+      debugPrint('❌ [ServicioIA] Error cargando modelo: $e');
+      debugPrint('Stack: $stack');
       _modeloCargado = false;
-    }
-  }
-
-  Future<List<Map<String, dynamic>>> detectarEnImagen({
-    required File archivo,
-  }) async {
-    debugPrint('🔍 Detectando en imagen: ${archivo.path}');
-
-    if (!_modeloCargado || _interpreter == null) {
-      await cargarModelo();
-    }
-
-    try {
-      final bytes = await archivo.readAsBytes();
-      final image = img.decodeImage(bytes);
-
-      if (image == null) throw Exception('No se pudo decodificar la imagen');
-
-      final resized = img.copyResize(image, width: 640, height: 640);
-      final inputBytes = _imageToByteListFloat32(resized, 640, 640);
-      final input = inputBytes.reshape([1, 640, 640, 3]);
-
-      final output = List.generate(
-        1,
-        (_) => List.generate(300, (_) => List<double>.filled(6, 0)),
-      );
-
-      _interpreter!.run(input, output);
-
-      final detecciones = _postProcess(output[0], image.width, image.height);
-
-      debugPrint('📊 ${detecciones.length} detecciones encontradas');
-      return detecciones;
-    } catch (e, stackTrace) {
-      debugPrint('❌ Error en detección: $e');
-      debugPrint('StackTrace: $stackTrace');
       rethrow;
     }
   }
 
+  // ═══════════════════════════════════════════════════════
+  // DETECTAR EN IMAGEN CON TFLITE (análisis estático)
+  // ═══════════════════════════════════════════════════════
+  Future<List<Map<String, dynamic>>> detectarEnImagen({
+    required File archivo,
+  }) async {
+    debugPrint('\n🔍 ══════════════════════════════════════════════');
+    debugPrint('🔍 [ServicioIA] detectarEnImagen: ${archivo.path}');
+    debugPrint('🔍 ══════════════════════════════════════════════');
+
+    final existe = await archivo.exists();
+    if (!existe) throw Exception('Archivo no encontrado: ${archivo.path}');
+    debugPrint('🔍 Tamaño: ${await archivo.length()} bytes');
+
+    if (!_modeloCargado || _interpreter == null) {
+      debugPrint('⚠️ Modelo no cargado, cargando ahora...');
+      await cargarModelo();
+    }
+
+    try {
+      // PASO 1: Leer y decodificar imagen
+      debugPrint('🔵 [PASO 1] Decodificando imagen...');
+      final bytes = await archivo.readAsBytes();
+      final image = img.decodeImage(bytes);
+      if (image == null) throw Exception('No se pudo decodificar la imagen');
+      debugPrint('🔵 [PASO 1] OK — ${image.width}×${image.height} px');
+
+      // PASO 2: Redimensionar a 640×640
+      debugPrint('🔵 [PASO 2] Redimensionando a ${_inputSize}×$_inputSize...');
+      final resized = img.copyResize(
+        image,
+        width: _inputSize,
+        height: _inputSize,
+      );
+      debugPrint('🔵 [PASO 2] OK');
+
+      // PASO 3: Convertir a Float32 normalizado [0,1]
+      debugPrint(
+        '🔵 [PASO 3] Convirtiendo a Float32 [1, $_inputSize, $_inputSize, 3]...',
+      );
+      final inputBytes = _imageToByteListFloat32(
+        resized,
+        _inputSize,
+        _inputSize,
+      );
+      final input = inputBytes.reshape([1, _inputSize, _inputSize, 3]);
+      debugPrint('🔵 [PASO 3] OK — ${inputBytes.length} valores');
+
+      // PASO 4: Preparar buffer de salida según shape real del modelo
+      final outputShape = _interpreter!.getOutputTensor(0).shape;
+      final numDetecciones = outputShape.length > 1 ? outputShape[1] : 300;
+      final numCampos = outputShape.length > 2 ? outputShape[2] : 6;
+      debugPrint(
+        '🔵 [PASO 4] Output shape: $outputShape → buffer [$numDetecciones × $numCampos]',
+      );
+
+      final output = List.generate(
+        1,
+        (_) => List.generate(
+          numDetecciones,
+          (_) => List<double>.filled(numCampos, 0),
+        ),
+      );
+
+      // PASO 5: Inferencia
+      debugPrint(
+        '🔵 [PASO 5] Ejecutando inferencia (640×640 float16, puede tardar ~2-4s)...',
+      );
+      final t0 = DateTime.now();
+      _interpreter!.run(input, output);
+      final ms = DateTime.now().difference(t0).inMilliseconds;
+      debugPrint('🔵 [PASO 5] OK — ${ms}ms');
+
+      // PASO 6: Log raw
+      debugPrint('🔵 [PASO 6] Raw output (conf > 0.01):');
+      int cnt = 0;
+      for (int i = 0; i < output[0].length && cnt < 10; i++) {
+        final d = output[0][i];
+        if (d[4] > 0.01) {
+          debugPrint(
+            '  [$i] x=${d[0].toStringAsFixed(4)} y=${d[1].toStringAsFixed(4)} '
+            'w=${d[2].toStringAsFixed(4)} h=${d[3].toStringAsFixed(4)} '
+            'conf=${d[4].toStringAsFixed(4)} cls=${d[5].toInt()}',
+          );
+          cnt++;
+        }
+      }
+      if (cnt == 0) debugPrint('  (ninguna fila con conf > 0.01)');
+
+      // PASO 7: Post-procesar
+      debugPrint('🔵 [PASO 7] Post-procesando...');
+      final detecciones = _postProcess(output[0], image.width, image.height);
+      debugPrint('🔵 [PASO 7] OK — ${detecciones.length} detecciones tras NMS');
+
+      for (int i = 0; i < detecciones.length; i++) {
+        final d = detecciones[i];
+        final box = d['box'] as List;
+        debugPrint(
+          '  Det[$i] tag="${d['tag']}" '
+          'conf=${((d['confianza'] as double) * 100).toStringAsFixed(1)}% '
+          'box=[${box.map((v) => (v as double).toStringAsFixed(1)).join(', ')}] '
+          'sev=${d['severidad']}',
+        );
+      }
+
+      debugPrint('🔍 ══════════════════════════════════════════════\n');
+      return detecciones;
+    } catch (e, stack) {
+      debugPrint('❌ [ServicioIA] Error en detección: $e\n$stack');
+      rethrow;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // PREPROCESAR IMAGEN → TENSOR FLOAT32
+  // ═══════════════════════════════════════════════════════
   Float32List _imageToByteListFloat32(
     img.Image image,
     int inputWidth,
     int inputHeight,
   ) {
-    final convertedBytes = Float32List(1 * inputHeight * inputWidth * 3);
-    int pixelIndex = 0;
-
+    final buffer = Float32List(1 * inputHeight * inputWidth * 3);
+    int idx = 0;
     for (int i = 0; i < inputHeight; i++) {
       for (int j = 0; j < inputWidth; j++) {
         final pixel = image.getPixel(j, i);
-        convertedBytes[pixelIndex++] = pixel.r / 255.0;
-        convertedBytes[pixelIndex++] = pixel.g / 255.0;
-        convertedBytes[pixelIndex++] = pixel.b / 255.0;
+        buffer[idx++] = pixel.r / 255.0;
+        buffer[idx++] = pixel.g / 255.0;
+        buffer[idx++] = pixel.b / 255.0;
       }
     }
-
-    return convertedBytes;
+    return buffer;
   }
 
+  // ═══════════════════════════════════════════════════════
+  // POST-PROCESAR SALIDA DEL MODELO
+  // ═══════════════════════════════════════════════════════
   List<Map<String, dynamic>> _postProcess(
     List<List<double>> output,
     int originalWidth,
@@ -98,38 +216,66 @@ class ServicioIA {
   ) {
     final detecciones = <Map<String, dynamic>>[];
 
-    for (final detection in output) {
-      final x = detection[0];
-      final y = detection[1];
-      final w = detection[2];
-      final h = detection[3];
-      final confidence = detection[4];
-      final classId = detection[5].toInt();
+    bool? isXYXY;
+    for (final d in output) {
+      if (d[4] >= Constantes.umbralConfianza) {
+        isXYXY = (d[2] > d[0] && d[3] > d[1]);
+        debugPrint(
+          '🟠 [PostProc] Formato: ${isXYXY ? "x1y1x2y2 (corners)" : "cxcywh (center+size)"}',
+        );
+        break;
+      }
+    }
+    if (isXYXY == null) {
+      debugPrint(
+        '⚠️ [PostProc] Sin detecciones con conf >= ${Constantes.umbralConfianza}',
+      );
+      return [];
+    }
 
-      if (confidence < Constantes.umbralConfianza) continue;
+    for (final d in output) {
+      final conf = d[4];
+      final classId = d[5].toInt();
+
+      if (conf < Constantes.umbralConfianza) continue;
       if (classId < 0 || classId >= Constantes.nombresClases.length) continue;
 
       final className = Constantes.nombresClases[classId];
-      final scaleX = originalWidth / 640.0;
-      final scaleY = originalHeight / 640.0;
 
-      final x1 = (x - w / 2) * scaleX;
-      final y1 = (y - h / 2) * scaleY;
-      final x2 = (x + w / 2) * scaleX;
-      final y2 = (y + h / 2) * scaleY;
+      double x1, y1, x2, y2;
+      if (isXYXY) {
+        x1 = d[0] * originalWidth;
+        y1 = d[1] * originalHeight;
+        x2 = d[2] * originalWidth;
+        y2 = d[3] * originalHeight;
+      } else {
+        final cx = d[0] * originalWidth;
+        final cy = d[1] * originalHeight;
+        final w = d[2] * originalWidth;
+        final h = d[3] * originalHeight;
+        x1 = cx - w / 2;
+        y1 = cy - h / 2;
+        x2 = cx + w / 2;
+        y2 = cy + h / 2;
+      }
 
-      if (x1 >= x2 || y1 >= y2) continue;
+      x1 = x1.clamp(0.0, originalWidth.toDouble());
+      y1 = y1.clamp(0.0, originalHeight.toDouble());
+      x2 = x2.clamp(0.0, originalWidth.toDouble());
+      y2 = y2.clamp(0.0, originalHeight.toDouble());
 
-      final severidad = Constantes.obtenerSeveridadPorClase(className);
-      final colorSemaforo = Constantes.obtenerColorSemaforo(severidad);
+      if (x2 <= x1 || y2 <= y1) continue;
+
+      final sev = Constantes.obtenerSeveridadPorClase(className);
+      final color = Constantes.obtenerColorSemaforo(sev);
 
       detecciones.add({
         'tag': className,
-        'confidence': confidence,
+        'confidence': conf,
         'fase': className,
-        'confianza': confidence,
-        'severidad': severidad,
-        'colorSemaforo': colorSemaforo,
+        'confianza': conf,
+        'severidad': sev,
+        'colorSemaforo': color,
         'box': [x1, y1, x2, y2],
       });
     }
@@ -137,282 +283,377 @@ class ServicioIA {
     return _applyNMS(detecciones);
   }
 
+  // ═══════════════════════════════════════════════════════
+  // NMS
+  // ═══════════════════════════════════════════════════════
   List<Map<String, dynamic>> _applyNMS(List<Map<String, dynamic>> boxes) {
     if (boxes.isEmpty) return [];
-
     boxes.sort(
       (a, b) => (b['confianza'] as double).compareTo(a['confianza'] as double),
     );
-
     final selected = <Map<String, dynamic>>[];
-    final suppressed = List.filled(boxes.length, false);
-
+    final suppressed = List<bool>.filled(boxes.length, false);
     for (int i = 0; i < boxes.length; i++) {
       if (suppressed[i]) continue;
       selected.add(boxes[i]);
-
+      final boxA = boxes[i]['box'] as List;
       for (int j = i + 1; j < boxes.length; j++) {
         if (suppressed[j]) continue;
-        final iou = _calculateIoU(boxes[i]['box'], boxes[j]['box']);
-        if (iou > Constantes.umbralIoU) suppressed[j] = true;
+        if (_calcIoU(boxA, boxes[j]['box'] as List) > Constantes.umbralIoU) {
+          suppressed[j] = true;
+        }
       }
     }
-
     return selected;
   }
 
-  double _calculateIoU(List<dynamic> box1, List<dynamic> box2) {
-    final x1 = box1[0] as double;
-    final y1 = box1[1] as double;
-    final x2 = box1[2] as double;
-    final y2 = box1[3] as double;
-
-    final x1b = box2[0] as double;
-    final y1b = box2[1] as double;
-    final x2b = box2[2] as double;
-    final y2b = box2[3] as double;
-
-    final xi1 = x1 > x1b ? x1 : x1b;
-    final yi1 = y1 > y1b ? y1 : y1b;
-    final xi2 = x2 < x2b ? x2 : x2b;
-    final yi2 = y2 < y2b ? y2 : y2b;
-
-    final interArea =
-        (xi2 - xi1).clamp(0, double.infinity) *
-        (yi2 - yi1).clamp(0, double.infinity);
-    final box1Area = (x2 - x1) * (y2 - y1);
-    final box2Area = (x2b - x1b) * (y2b - y1b);
-    final unionArea = box1Area + box2Area - interArea;
-
-    return interArea / unionArea;
+  double _calcIoU(List a, List b) {
+    final x1 = (a[0] as double) > (b[0] as double)
+        ? a[0] as double
+        : b[0] as double;
+    final y1 = (a[1] as double) > (b[1] as double)
+        ? a[1] as double
+        : b[1] as double;
+    final x2 = (a[2] as double) < (b[2] as double)
+        ? a[2] as double
+        : b[2] as double;
+    final y2 = (a[3] as double) < (b[3] as double)
+        ? a[3] as double
+        : b[3] as double;
+    final inter =
+        ((x2 - x1).clamp(0.0, double.infinity)) *
+        ((y2 - y1).clamp(0.0, double.infinity));
+    final areaA =
+        ((a[2] as double) - (a[0] as double)) *
+        ((a[3] as double) - (a[1] as double));
+    final areaB =
+        ((b[2] as double) - (b[0] as double)) *
+        ((b[3] as double) - (b[1] as double));
+    final union = areaA + areaB - inter;
+    return union > 0 ? inter / union : 0.0;
   }
 
-  List<Map<String, dynamic>> procesarResultadosYOLO(List<YOLOResult> results) {
-    final detecciones = <Map<String, dynamic>>[];
+  // ═══════════════════════════════════════════════════════
+  // PROCESAR RESULTADOS YOLO (tiempo real → Map)
+  // ═══════════════════════════════════════════════════════
+  List<Map<String, dynamic>> procesarResultadosYOLO(List<YOLOResult> results) =>
+      results.map((r) => _yoloResultToMap(r)).toList();
 
-    for (final result in results) {
-      try {
-        if (!Constantes.nombresClases.contains(result.className)) continue;
-        if (result.confidence < Constantes.umbralConfianza) continue;
+  Map<String, dynamic> procesarDeteccionYOLO(YOLOResult result) =>
+      _yoloResultToMap(result);
 
-        final severidad = Constantes.obtenerSeveridadPorClase(result.className);
-        final colorSemaforo = Constantes.obtenerColorSemaforo(severidad);
-
-        detecciones.add({
-          'fase': result.className,
-          'confianza': result.confidence,
-          'severidad': severidad,
-          'colorSemaforo': colorSemaforo,
-          'box': [
-            result.boundingBox.left,
-            result.boundingBox.top,
-            result.boundingBox.right,
-            result.boundingBox.bottom,
-          ],
-        });
-      } catch (e) {
-        debugPrint('❌ Error procesando resultado: $e');
-      }
-    }
-    return detecciones;
-  }
-
-  Map<String, dynamic> procesarDeteccion(Map<String, dynamic> deteccion) {
-    final fase = deteccion['fase'] as String? ?? deteccion['tag'] as String;
-    final confianza =
-        deteccion['confianza'] as double? ?? deteccion['confidence'] as double;
-    final severidad = Constantes.obtenerSeveridadPorClase(fase);
-    final colorSemaforo = Constantes.obtenerColorSemaforo(severidad);
-
+  Map<String, dynamic> _yoloResultToMap(YOLOResult r) {
+    final sev = Constantes.obtenerSeveridadPorClase(r.className);
+    final color = Constantes.obtenerColorSemaforo(sev);
     return {
-      'fase': fase,
-      'confianza': confianza,
-      'severidad': severidad,
-      'colorSemaforo': colorSemaforo,
+      'tag': r.className,
+      'confidence': r.confidence,
+      'fase': r.className,
+      'confianza': r.confidence,
+      'severidad': sev,
+      'colorSemaforo': color,
+      'box': [
+        r.boundingBox.left,
+        r.boundingBox.top,
+        r.boundingBox.right,
+        r.boundingBox.bottom,
+      ],
     };
   }
 
+  Map<String, dynamic> procesarDeteccion(Map<String, dynamic> deteccion) {
+    final tag = deteccion['tag'] as String? ?? deteccion['fase'] as String;
+    final conf =
+        deteccion['confidence'] as double? ?? deteccion['confianza'] as double;
+    final sev = Constantes.obtenerSeveridadPorClase(tag);
+    final color = Constantes.obtenerColorSemaforo(sev);
+    return {
+      'fase': tag,
+      'confianza': conf,
+      'severidad': sev,
+      'colorSemaforo': color,
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // DIBUJAR ANOTACIONES — YOLOResult (tiempo real)
+  // ═══════════════════════════════════════════════════════
   Future<File> dibujarAnotacionesEnImagen({
     required File imagenOriginal,
     required List<YOLOResult> detecciones,
   }) async {
-    try {
-      debugPrint('🎨 Dibujando ${detecciones.length} anotaciones...');
-
-      final bytes = await imagenOriginal.readAsBytes();
-      final imagen = img.decodeImage(bytes);
-
-      if (imagen == null) throw Exception('No se pudo decodificar la imagen');
-
-      for (final deteccion in detecciones) {
-        final box = deteccion.boundingBox;
-        final className = deteccion.className;
-        final confidence = deteccion.confidence;
-
-        final x1 = box.left.toInt().clamp(0, imagen.width - 1);
-        final y1 = box.top.toInt().clamp(0, imagen.height - 1);
-        final x2 = box.right.toInt().clamp(0, imagen.width - 1);
-        final y2 = box.bottom.toInt().clamp(0, imagen.height - 1);
-
-        if (x2 <= x1 || y2 <= y1) continue;
-
-        final severidad = Constantes.obtenerSeveridadPorClase(className);
-        final color = _colorPorSeveridad(severidad);
-
-        img.drawRect(
-          imagen,
-          x1: x1,
-          y1: y1,
-          x2: x2,
-          y2: y2,
-          color: color,
-          thickness: 4,
-        );
-
-        final nombreClase = Constantes.obtenerNombreClase(className);
-        final porcentaje = '${(confidence * 100).toStringAsFixed(0)}%';
-        _dibujarTexto(imagen, '$nombreClase $porcentaje', x1, y1 - 30, color);
-      }
-
-      final dir = await getTemporaryDirectory();
-      final timestamp = DateTime.now().millisecondsSinceEpoch;
-      final ruta = '${dir.path}/anotada_$timestamp.jpg';
-      final archivo = File(ruta);
-
-      await archivo.writeAsBytes(img.encodeJpg(imagen, quality: 95));
-
-      debugPrint('✅ Imagen anotada: $ruta');
-      return archivo;
-    } catch (e, stackTrace) {
-      debugPrint('❌ Error dibujando: $e');
-      debugPrint('StackTrace: $stackTrace');
-      rethrow;
-    }
+    return _dibujarImpl(imagenOriginal, yoloResults: detecciones);
   }
 
+  // ═══════════════════════════════════════════════════════
+  // DIBUJAR ANOTACIONES — Map (análisis estático TFLite)
+  // ═══════════════════════════════════════════════════════
   Future<File> dibujarAnotacionesEnImagenMap({
     required File imagenOriginal,
     required List<Map<String, dynamic>> detecciones,
   }) async {
-    try {
-      debugPrint('🎨 Dibujando ${detecciones.length} anotaciones...');
+    return _dibujarImpl(imagenOriginal, mapResults: detecciones);
+  }
 
+  // ═══════════════════════════════════════════════════════
+  // IMPLEMENTACIÓN UNIFICADA DE DIBUJO
+  // ═══════════════════════════════════════════════════════
+  Future<File> _dibujarImpl(
+    File imagenOriginal, {
+    List<YOLOResult>? yoloResults,
+    List<Map<String, dynamic>>? mapResults,
+  }) async {
+    debugPrint('\n🎨 [_dibujarImpl] INICIO: ${imagenOriginal.path}');
+
+    final existeEntrada = await imagenOriginal.exists();
+    if (!existeEntrada) {
+      throw Exception(
+        '[_dibujarImpl] Archivo no existe: ${imagenOriginal.path}',
+      );
+    }
+
+    try {
+      // PASO A: Decodificar
       final bytes = await imagenOriginal.readAsBytes();
       final imagen = img.decodeImage(bytes);
+      if (imagen == null) throw Exception('img.decodeImage devolvió null');
+      debugPrint('🔵 [DibujarA] OK — ${imagen.width}×${imagen.height} px');
 
-      if (imagen == null) throw Exception('No se pudo decodificar la imagen');
+      // PASO B: Dibujar — Rama YOLOResult (tiempo real)
+      if (yoloResults != null) {
+        debugPrint('🔵 [DibujarB] YOLOResult — ${yoloResults.length} items');
+        for (int i = 0; i < yoloResults.length; i++) {
+          final det = yoloResults[i];
+          final box = det.boundingBox;
+          final esPxNativos = box.right > 1.5 || box.bottom > 1.5;
 
-      for (final deteccion in detecciones) {
-        final box = (deteccion['box'] as List).cast<double>();
-        final tag = deteccion['tag'] as String? ?? deteccion['fase'] as String;
-        final confianza =
-            deteccion['confidence'] as double? ??
-            deteccion['confianza'] as double;
+          double x1, y1, x2, y2;
+          if (esPxNativos) {
+            final scaleX = imagen.width / 640.0;
+            final scaleY = imagen.height / 640.0;
+            x1 = box.left * scaleX;
+            y1 = box.top * scaleY;
+            x2 = box.right * scaleX;
+            y2 = box.bottom * scaleY;
+          } else {
+            x1 = box.left * imagen.width;
+            y1 = box.top * imagen.height;
+            x2 = box.right * imagen.width;
+            y2 = box.bottom * imagen.height;
+          }
 
-        final x1 = box[0].toInt().clamp(0, imagen.width - 1);
-        final y1 = box[1].toInt().clamp(0, imagen.height - 1);
-        final x2 = box[2].toInt().clamp(0, imagen.width - 1);
-        final y2 = box[3].toInt().clamp(0, imagen.height - 1);
+          x1 = x1.clamp(0.0, imagen.width.toDouble());
+          y1 = y1.clamp(0.0, imagen.height.toDouble());
+          x2 = x2.clamp(0.0, imagen.width.toDouble());
+          y2 = y2.clamp(0.0, imagen.height.toDouble());
 
-        if (x2 <= x1 || y2 <= y1) continue;
+          if (x2 <= x1 + 2 || y2 <= y1 + 2) continue;
 
-        final severidad = Constantes.obtenerSeveridadPorClase(tag);
-        final color = _colorPorSeveridad(severidad);
+          final sev = Constantes.obtenerSeveridadPorClase(det.className);
+          final color = _colorPorSeveridad(sev);
+          final label =
+              '${Constantes.obtenerNombreLegible(det.className)} '
+              '${(det.confidence * 100).toStringAsFixed(0)}%';
 
-        img.drawRect(
-          imagen,
-          x1: x1,
-          y1: y1,
-          x2: x2,
-          y2: y2,
-          color: color,
-          thickness: 4,
-        );
-
-        final nombreClase = Constantes.obtenerNombreClase(tag);
-        final porcentaje = '${(confianza * 100).toStringAsFixed(0)}%';
-        _dibujarTexto(imagen, '$nombreClase $porcentaje', x1, y1 - 30, color);
+          _dibujarCuadro(
+            imagen,
+            x1.toInt(),
+            y1.toInt(),
+            x2.toInt(),
+            y2.toInt(),
+            color,
+          );
+          _dibujarTexto(imagen, label, x1.toInt(), y1.toInt(), color);
+          debugPrint('✅ [YOLO $i] $label');
+        }
       }
 
+      // PASO B: Dibujar — Rama Map (análisis estático TFLite)
+      if (mapResults != null) {
+        debugPrint('🔵 [DibujarB] Map (TFLite) — ${mapResults.length} items');
+        for (int i = 0; i < mapResults.length; i++) {
+          final det = mapResults[i];
+          final boxRaw = det['box'];
+          final tag = det['tag'] as String? ?? det['fase'] as String;
+          final conf =
+              det['confidence'] as double? ?? det['confianza'] as double;
+
+          if (boxRaw == null) continue;
+          final box = (boxRaw as List).cast<double>();
+
+          final esPxDirectos = box[2] > 1.5 || box[3] > 1.5;
+          double x1, y1, x2, y2;
+          if (esPxDirectos) {
+            x1 = box[0];
+            y1 = box[1];
+            x2 = box[2];
+            y2 = box[3];
+          } else {
+            x1 = box[0] * imagen.width;
+            y1 = box[1] * imagen.height;
+            x2 = box[2] * imagen.width;
+            y2 = box[3] * imagen.height;
+          }
+
+          x1 = x1.clamp(0.0, imagen.width.toDouble());
+          y1 = y1.clamp(0.0, imagen.height.toDouble());
+          x2 = x2.clamp(0.0, imagen.width.toDouble());
+          y2 = y2.clamp(0.0, imagen.height.toDouble());
+
+          if (x2 <= x1 + 2 || y2 <= y1 + 2) continue;
+
+          final sev = Constantes.obtenerSeveridadPorClase(tag);
+          final color = _colorPorSeveridad(sev);
+          final label =
+              '${Constantes.obtenerNombreLegible(tag)} '
+              '${(conf * 100).toStringAsFixed(0)}%';
+
+          _dibujarCuadro(
+            imagen,
+            x1.toInt(),
+            y1.toInt(),
+            x2.toInt(),
+            y2.toInt(),
+            color,
+          );
+          _dibujarTexto(imagen, label, x1.toInt(), y1.toInt(), color);
+          debugPrint('✅ [Map $i] $label sev=$sev');
+        }
+      }
+
+      // PASO C: Guardar imagen anotada
       final dir = await getTemporaryDirectory();
-      final timestamp = DateTime.now().millisecondsSinceEpoch;
-      final ruta = '${dir.path}/anotada_$timestamp.jpg';
+      final ruta =
+          '${dir.path}/anotada_${DateTime.now().millisecondsSinceEpoch}.jpg';
       final archivo = File(ruta);
+      final jpgBytes = img.encodeJpg(imagen, quality: 92);
+      await archivo.writeAsBytes(jpgBytes);
 
-      await archivo.writeAsBytes(img.encodeJpg(imagen, quality: 95));
+      final tamSalida = await archivo.length();
+      if (tamSalida < 100) throw Exception('Archivo de salida inválido');
 
-      debugPrint('✅ Imagen anotada: $ruta');
+      debugPrint('✅ [_dibujarImpl] ÉXITO — $ruta ($tamSalida bytes)');
       return archivo;
-    } catch (e, stackTrace) {
-      debugPrint('❌ Error dibujando: $e');
-      debugPrint('StackTrace: $stackTrace');
+    } catch (e, stack) {
+      debugPrint('❌ [_dibujarImpl] FALLO: $e\n$stack');
       rethrow;
     }
   }
 
-  img.Color _colorPorSeveridad(int severidad) {
-    switch (severidad) {
-      case 0:
-        return img.ColorRgb8(76, 175, 80);
-      case 1:
-        return img.ColorRgb8(255, 193, 7);
-      case 2:
-        return img.ColorRgb8(255, 152, 0);
-      case 3:
-        return img.ColorRgb8(244, 67, 54);
-      default:
-        return img.ColorRgb8(158, 158, 158);
-    }
+  // ═══════════════════════════════════════════════════════
+  // HELPERS DE DIBUJO
+  // ═══════════════════════════════════════════════════════
+  void _dibujarCuadro(
+    img.Image im,
+    int x1,
+    int y1,
+    int x2,
+    int y2,
+    img.Color color,
+  ) {
+    img.drawRect(
+      im,
+      x1: (x1 - 3).clamp(0, im.width - 1),
+      y1: (y1 - 3).clamp(0, im.height - 1),
+      x2: (x2 + 3).clamp(0, im.width - 1),
+      y2: (y2 + 3).clamp(0, im.height - 1),
+      color: img.ColorRgb8(0, 0, 0),
+      thickness: 10,
+    );
+    img.drawRect(
+      im,
+      x1: x1,
+      y1: y1,
+      x2: x2,
+      y2: y2,
+      color: color,
+      thickness: 8,
+    );
   }
 
   void _dibujarTexto(
-    img.Image imagen,
+    img.Image im,
     String texto,
     int x,
     int y,
     img.Color color,
   ) {
-    final anchoTexto = texto.length * 9 + 12;
-    const altoTexto = 24;
-
-    final xT = x.clamp(0, imagen.width - anchoTexto);
-    final yT = y.clamp(5, imagen.height - altoTexto);
+    final anchoTexto = texto.length * 22 + 40;
+    const altoTexto = 70;
+    final xT = x.clamp(0, (im.width - anchoTexto).clamp(0, im.width));
+    final yT = (y - altoTexto).clamp(
+      0,
+      (im.height - altoTexto).clamp(0, im.height),
+    );
 
     img.fillRect(
-      imagen,
+      im,
       x1: xT,
       y1: yT,
-      x2: xT + anchoTexto,
-      y2: yT + altoTexto,
+      x2: (xT + anchoTexto).clamp(0, im.width - 1),
+      y2: (yT + altoTexto).clamp(0, im.height - 1),
       color: img.ColorRgb8(0, 0, 0),
     );
     img.drawRect(
-      imagen,
+      im,
       x1: xT,
       y1: yT,
-      x2: xT + anchoTexto,
-      y2: yT + altoTexto,
+      x2: (xT + anchoTexto).clamp(0, im.width - 1),
+      y2: (yT + altoTexto).clamp(0, im.height - 1),
       color: color,
-      thickness: 2,
+      thickness: 5,
     );
+    for (int ox = -1; ox <= 1; ox++) {
+      for (int oy = -1; oy <= 1; oy++) {
+        if (ox != 0 || oy != 0) {
+          img.drawString(
+            im,
+            texto,
+            font: img.arial48,
+            x: xT + 16 + ox,
+            y: yT + 12 + oy,
+            color: img.ColorRgb8(0, 0, 0),
+          );
+        }
+      }
+    }
     img.drawString(
-      imagen,
+      im,
       texto,
-      font: img.arial14,
-      x: xT + 6,
-      y: yT + 5,
+      font: img.arial48,
+      x: xT + 16,
+      y: yT + 12,
       color: img.ColorRgb8(255, 255, 255),
     );
   }
 
+  img.Color _colorPorSeveridad(int sev) {
+    switch (sev) {
+      case 0:
+        return img.ColorRgb8(0, 200, 83);
+      case 1:
+        return img.ColorRgb8(255, 214, 0);
+      case 2:
+        return img.ColorRgb8(255, 109, 0);
+      case 3:
+        return img.ColorRgb8(213, 0, 0);
+      default:
+        return img.ColorRgb8(255, 255, 255);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // CERRAR MODELO
+  // ═══════════════════════════════════════════════════════
   Future<void> cerrarModelo() async {
+    debugPrint('🔄 [ServicioIA] Cerrando modelo...');
     try {
       _interpreter?.close();
       _interpreter = null;
       _modeloCargado = false;
-      debugPrint('✅ Modelo cerrado');
+      debugPrint('✅ [ServicioIA] Modelo cerrado');
     } catch (e) {
-      debugPrint('⚠️ Error cerrando: $e');
+      debugPrint('⚠️ [ServicioIA] Error cerrando: $e');
     }
   }
 }

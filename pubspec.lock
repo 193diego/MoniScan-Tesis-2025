@@ -744,14 +744,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "6.0.0"
-  lite_vision_ai:
-    dependency: "direct main"
-    description:
-      name: lite_vision_ai
-      sha256: "7a2b47157f0461bdc4a7305079534ca41fa0fc4343cab681881751f2896130aa"
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.0.1"
   matcher:
     dependency: transitive
     description:
@@ -1126,7 +1118,7 @@ packages:
     source: hosted
     version: "0.7.7"
   tflite_flutter:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: tflite_flutter
       sha256: "0bba9040d8decda0960d7abf8eabf32243bf092bc7d0084e8e19681866b0bdbe"

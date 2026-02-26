@@ -1,333 +1,333 @@
+// lib/presentacion/pantallas/inicio_screen.dart
+// ✅ BOTÓN DIAGNÓSTICO COMENTADO
 import 'package:flutter/material.dart';
 import '../../config/tema.dart';
 import 'escaneo_screen.dart';
 import 'subir_imagen_screen.dart';
-import 'seguimiento_screen.dart';
-import 'diagnostico_modelo_screen.dart'; // ✅ NUEVO IMPORT
+import 'historial_screen.dart';
+import 'perfil_screen.dart';
 
-/// Pantalla de inicio con diseño moderno e intuitivo
-class InicioScreen extends StatelessWidget {
+class InicioScreen extends StatefulWidget {
   final String cedulaUsuario;
+
   const InicioScreen({super.key, required this.cedulaUsuario});
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        title: const Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.agriculture),
-            SizedBox(width: 8),
-            Text('MoniScan'),
-          ],
-        ),
-        centerTitle: true,
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Header
-            const Text(
-              'Bienvenido',
-              style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              '¿Qué deseas hacer hoy?',
-              style: TextStyle(
-                fontSize: 16,
-                color: TemaApp.colorTextoSecundario,
-              ),
-            ),
-            const SizedBox(height: 32),
-
-            // Opción 1: Escaneo en tiempo real
-            _OpcionModerna(
-              icono: Icons.camera_alt_rounded,
-              titulo: 'Escaneo en Tiempo Real',
-              descripcion: 'Detecta moniliasis con la cámara',
-              color: const Color(0xFF4CAF50),
-              gradiente: const LinearGradient(
-                colors: [Color(0xFF4CAF50), Color(0xFF66BB6A)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              alPresionar: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => EscaneoScreen(cedulaUsuario: cedulaUsuario),
-                  ),
-                );
-              },
-            ),
-            const SizedBox(height: 16),
-
-            // Opción 2: Analizar imagen
-            _OpcionModerna(
-              icono: Icons.photo_library_rounded,
-              titulo: 'Analizar desde Galería',
-              descripcion: 'Sube una foto para analizar',
-              color: const Color(0xFF2196F3),
-              gradiente: const LinearGradient(
-                colors: [Color(0xFF2196F3), Color(0xFF42A5F5)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              alPresionar: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        SubirImagenScreen(cedulaUsuario: cedulaUsuario),
-                  ),
-                );
-              },
-            ),
-            const SizedBox(height: 16),
-
-            // Opción 3: Seguimiento
-            _OpcionModerna(
-              icono: Icons.timeline_rounded,
-              titulo: 'Seguimiento Activo',
-              descripcion: 'Rastrea la evolución de mazorcas',
-              color: const Color(0xFF9C27B0),
-              gradiente: const LinearGradient(
-                colors: [Color(0xFF9C27B0), Color(0xFFAB47BC)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              alPresionar: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        SeguimientoScreen(cedulaUsuario: cedulaUsuario),
-                  ),
-                );
-              },
-            ),
-
-            // ✅ BOTÓN DE DIAGNÓSTICO (NUEVO)
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const DiagnosticoModeloScreen(),
-                    ),
-                  );
-                },
-                icon: const Icon(Icons.bug_report, size: 20),
-                label: const Text('🧪 Diagnosticar Modelo'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.deepPurple,
-                  side: const BorderSide(color: Colors.deepPurple, width: 2),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
-              ),
-            ),
-
-            const SizedBox(height: 32),
-
-            // Información adicional
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: TemaApp.verdeClaro.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: TemaApp.verdeClaro, width: 1),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.info_outline, color: TemaApp.verdePrimario),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      'Todas las detecciones se guardan automáticamente con coordenadas GPS',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: TemaApp.verdePrimario,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  State<InicioScreen> createState() => _InicioScreenState();
 }
 
-/// Widget de opción moderna con animación y diseño mejorado
-class _OpcionModerna extends StatefulWidget {
-  final IconData icono;
-  final String titulo;
-  final String descripcion;
-  final Color color;
-  final Gradient gradiente;
-  final VoidCallback alPresionar;
-
-  const _OpcionModerna({
-    required this.icono,
-    required this.titulo,
-    required this.descripcion,
-    required this.color,
-    required this.gradiente,
-    required this.alPresionar,
-  });
-
-  @override
-  State<_OpcionModerna> createState() => _OpcionModernaState();
-}
-
-class _OpcionModernaState extends State<_OpcionModerna>
+class _InicioScreenState extends State<InicioScreen>
     with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
+  late AnimationController _animationController;
   late Animation<double> _scaleAnimation;
-  bool _isPressed = false;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
-      duration: const Duration(milliseconds: 150),
+    _animationController = AnimationController(
       vsync: this,
+      duration: const Duration(milliseconds: 600),
     );
-    _scaleAnimation = Tween<double>(
-      begin: 1.0,
-      end: 0.95,
-    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+    _scaleAnimation = Tween<double>(begin: 0.8, end: 1.0).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.elasticOut),
+    );
+    _animationController.forward();
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    _animationController.dispose();
     super.dispose();
-  }
-
-  void _onTapDown(TapDownDetails details) {
-    setState(() => _isPressed = true);
-    _controller.forward();
-  }
-
-  void _onTapUp(TapUpDetails details) {
-    setState(() => _isPressed = false);
-    _controller.reverse();
-  }
-
-  void _onTapCancel() {
-    setState(() => _isPressed = false);
-    _controller.reverse();
   }
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTapDown: _onTapDown,
-      onTapUp: _onTapUp,
-      onTapCancel: _onTapCancel,
-      onTap: widget.alPresionar,
-      child: AnimatedBuilder(
-        animation: _scaleAnimation,
-        builder: (context, child) {
-          return Transform.scale(
-            scale: _scaleAnimation.value,
-            child: Container(
-              height: 110,
-              decoration: BoxDecoration(
-                gradient: widget.gradiente,
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: [
-                  BoxShadow(
-                    color: widget.color.withValues(
-                      alpha: _isPressed ? 0.3 : 0.25,
+    return Scaffold(
+      backgroundColor: TemaApp.colorFondo,
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 20),
+
+              // HEADER
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '¡Bienvenido!',
+                          style: TextStyle(
+                            fontSize: 32,
+                            fontWeight: FontWeight.bold,
+                            color: TemaApp.verdePrimario,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Detección de Moniliasis por fase',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.grey.shade600,
+                          ),
+                        ),
+                      ],
                     ),
-                    blurRadius: _isPressed ? 8 : 12,
-                    offset: Offset(0, _isPressed ? 2 : 4),
+                  ),
+                  // Botón perfil
+                  GestureDetector(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) =>
+                              PerfilScreen(cedulaUsuario: widget.cedulaUsuario),
+                        ),
+                      );
+                    },
+                    child: Hero(
+                      tag: 'foto_perfil',
+                      child: Container(
+                        width: 60,
+                        height: 60,
+                        decoration: BoxDecoration(
+                          color: TemaApp.verdeClaro,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: TemaApp.verdePrimario,
+                            width: 3,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: TemaApp.verdePrimario.withOpacity(0.3),
+                              blurRadius: 12,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: const Icon(
+                          Icons.person,
+                          color: TemaApp.verdePrimario,
+                          size: 32,
+                        ),
+                      ),
+                    ),
                   ),
                 ],
               ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 14,
+
+              const SizedBox(height: 40),
+
+              // ACCIONES PRINCIPALES
+              ScaleTransition(
+                scale: _scaleAnimation,
+                child: Column(
+                  children: [
+                    _buildBotonPrincipal(
+                      context: context,
+                      titulo: 'Escanear con cámara',
+                      subtitulo: 'Detección en tiempo real',
+                      icono: Icons.camera_alt,
+                      color: TemaApp.verdePrimario,
+                      onTap: () => _navegarAEscaneo(context),
+                    ),
+                    const SizedBox(height: 16),
+                    _buildBotonPrincipal(
+                      context: context,
+                      titulo: 'Subir imagen',
+                      subtitulo: 'Analizar desde galería',
+                      icono: Icons.photo_library,
+                      color: Colors.blue.shade600,
+                      onTap: () => _navegarASubirImagen(context),
+                    ),
+                    const SizedBox(height: 16),
+                    _buildBotonPrincipal(
+                      context: context,
+                      titulo: 'Historial',
+                      subtitulo: 'Ver detecciones guardadas',
+                      icono: Icons.history,
+                      color: Colors.orange.shade600,
+                      onTap: () => _navegarAHistorial(context),
+                    ),
+
+                    // ✅ BOTÓN DIAGNÓSTICO COMENTADO
+                    // const SizedBox(height: 16),
+                    // _buildBotonPrincipal(
+                    //   context: context,
+                    //   titulo: 'Diagnóstico del modelo',
+                    //   subtitulo: 'Verificar funcionamiento',
+                    //   icono: Icons.analytics,
+                    //   color: Colors.purple.shade600,
+                    //   onTap: () {
+                    //     // Navegar a pantalla de diagnóstico
+                    //   },
+                    // ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 40),
+
+              // INFO CARD
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      TemaApp.verdeClaro.withOpacity(0.3),
+                      TemaApp.verdeSecundario.withOpacity(0.2),
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: TemaApp.verdeSecundario.withOpacity(0.3),
+                  ),
                 ),
                 child: Row(
                   children: [
-                    // Icono redondeado
                     Container(
-                      width: 60,
-                      height: 60,
+                      padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.25),
-                        shape: BoxShape.circle,
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                      child: Icon(widget.icono, color: Colors.white, size: 30),
+                      child: const Icon(
+                        Icons.eco,
+                        color: TemaApp.verdePrimario,
+                        size: 32,
+                      ),
                     ),
                     const SizedBox(width: 16),
-                    // Texto
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text(
-                            widget.titulo,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
+                          const Text(
+                            'Detección de Moniliasis',
+                            style: TextStyle(
+                              fontSize: 18,
                               fontWeight: FontWeight.bold,
-                              letterSpacing: 0.3,
-                              height: 1.2,
+                              color: TemaApp.verdePrimario,
                             ),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            widget.descripcion,
+                            'Detección de Moniliasis en cacao CCN-51 por fase',
                             style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.9),
-                              fontSize: 12,
-                              height: 1.2,
+                              fontSize: 13,
+                              color: Colors.grey.shade700,
                             ),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
                           ),
                         ],
-                      ),
-                    ),
-                    // Flecha
-                    Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.2),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        Icons.arrow_forward_ios_rounded,
-                        color: Colors.white,
-                        size: 16,
                       ),
                     ),
                   ],
                 ),
               ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBotonPrincipal({
+    required BuildContext context,
+    required String titulo,
+    required String subtitulo,
+    required IconData icono,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: color.withOpacity(0.2),
+              blurRadius: 15,
+              offset: const Offset(0, 8),
             ),
-          );
-        },
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Icon(icono, color: color, size: 32),
+            ),
+            const SizedBox(width: 20),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    titulo,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitulo,
+                    style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.arrow_forward_ios,
+              color: Colors.grey.shade400,
+              size: 20,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _navegarAEscaneo(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => EscaneoScreen(
+          usuarioId: widget.cedulaUsuario,
+          onVolverInicio: () => Navigator.pop(context),
+        ),
+      ),
+    );
+  }
+
+  void _navegarASubirImagen(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) =>
+            SubirImagenScreen(cedulaUsuario: widget.cedulaUsuario),
+      ),
+    );
+  }
+
+  void _navegarAHistorial(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) =>
+            HistorialScreen(cedulaUsuario: widget.cedulaUsuario),
       ),
     );
   }

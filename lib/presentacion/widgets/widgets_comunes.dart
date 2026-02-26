@@ -1,4 +1,5 @@
 // lib/presentacion/widgets/widgets_comunes.dart
+// ✅ VERSIÓN FINAL - Sin warnings
 import 'package:flutter/material.dart';
 import '../../config/constantes.dart';
 import '../../config/tema.dart';
@@ -127,7 +128,7 @@ class CampoTextoPersonalizado extends StatelessWidget {
   }
 }
 
-/// Etiqueta de fase MEJORADA - Con manejo de overflow
+/// Etiqueta de fase CORREGIDA
 class EtiquetaFase extends StatelessWidget {
   final String fase;
   final double tamanoTexto;
@@ -136,22 +137,22 @@ class EtiquetaFase extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = Color(Constantes.obtenerColorPorClase(fase));
-    final nombreDescriptivo = Constantes.obtenerNombreClase(fase);
+    final color = Constantes.obtenerColorPorClase(fase);
+    final nombreDescriptivo = Constantes.obtenerNombreLegible(fase);
     final icono = _obtenerIconoFase(fase);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [color.withOpacity(0.8), color],
+          colors: [color.withValues(alpha: 0.8), color],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(8),
         boxShadow: [
           BoxShadow(
-            color: color.withOpacity(0.3),
+            color: color.withValues(alpha: 0.3),
             blurRadius: 4,
             offset: const Offset(0, 2),
           ),
@@ -162,7 +163,6 @@ class EtiquetaFase extends StatelessWidget {
         children: [
           Icon(icono, size: tamanoTexto + 2, color: Colors.white),
           const SizedBox(width: 6),
-          // CORRECCIÓN: Flexible para evitar overflow
           Flexible(
             child: Text(
               nombreDescriptivo,
@@ -172,9 +172,8 @@ class EtiquetaFase extends StatelessWidget {
                 color: Colors.white,
                 letterSpacing: 0.3,
               ),
-              overflow: TextOverflow
-                  .ellipsis, // Agregar puntos suspensivos si es muy largo
-              maxLines: 1, // Máximo 1 línea
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
             ),
           ),
         ],
@@ -182,17 +181,25 @@ class EtiquetaFase extends StatelessWidget {
     );
   }
 
+  // ✅ CORREGIDO: Llaves {} en todos los if
   IconData _obtenerIconoFase(String fase) {
-    if (fase.contains('Sana')) return Icons.check_circle;
-    if (fase.contains('Temprana')) return Icons.warning_amber;
-    if (fase.contains('Intermedia')) return Icons.error;
-    if (fase.contains('Avanzada')) return Icons.dangerous;
-    if (fase.contains('Critica')) return Icons.cancel;
+    if (fase.contains('SANA') || fase.contains('Sana')) {
+      return Icons.check_circle;
+    }
+    if (fase.contains('INICIAL') || fase.contains('Temprana')) {
+      return Icons.warning_amber;
+    }
+    if (fase.contains('INTERMEDIA') || fase.contains('Intermedia')) {
+      return Icons.error;
+    }
+    if (fase.contains('AVANZADA') || fase.contains('Avanzada')) {
+      return Icons.dangerous;
+    }
     return Icons.help;
   }
 }
 
-/// NUEVO: Widget para mostrar MÚLTIPLES etiquetas de fase
+/// Widget para mostrar MÚLTIPLES etiquetas de fase
 class EtiquetasFaseMultiples extends StatelessWidget {
   final List<String> fases;
   final double tamanoTexto;
@@ -205,16 +212,12 @@ class EtiquetasFaseMultiples extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (fases.isEmpty) {
-      return const SizedBox.shrink();
-    }
+    if (fases.isEmpty) return const SizedBox.shrink();
 
-    // Si solo hay una fase, mostrar etiqueta normal
     if (fases.length == 1) {
       return EtiquetaFase(fase: fases.first, tamanoTexto: tamanoTexto);
     }
 
-    // Si hay múltiples fases, mostrar Wrap con todas las etiquetas
     return Wrap(
       spacing: 6,
       runSpacing: 6,
@@ -298,97 +301,56 @@ class TarjetaEstadistica extends StatelessWidget {
     required this.icono,
     required this.titulo,
     required this.valor,
-    this.color = TemaApp.verdePrimario,
+    required this.color,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: color.withOpacity(0.1),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icono, size: 32, color: color),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              valor,
-              style: TextStyle(
-                fontSize: 28,
-                fontWeight: FontWeight.bold,
-                color: color,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              titulo,
-              style: const TextStyle(fontSize: 14, color: Colors.grey),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Separador con texto
-class SeparadorConTexto extends StatelessWidget {
-  final String texto;
-
-  const SeparadorConTexto({super.key, required this.texto});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        const Expanded(child: Divider()),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Text(
-            texto,
-            style: const TextStyle(color: Colors.grey, fontSize: 14),
-          ),
-        ),
-        const Expanded(child: Divider()),
-      ],
-    );
-  }
-}
-
-/// Banner de conexión MEJORADO
-class BannerConexionMejorado extends StatelessWidget {
-  final bool estaConectado;
-
-  const BannerConexionMejorado({super.key, required this.estaConectado});
-
-  @override
-  Widget build(BuildContext context) {
-    if (estaConectado) return const SizedBox.shrink();
-
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      color: Colors.orange,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: const [
-          Icon(Icons.cloud_off, color: Colors.white, size: 16),
-          SizedBox(width: 8),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(icono, color: color, size: 24),
+              ),
+              const Spacer(),
+            ],
+          ),
+          const SizedBox(height: 12),
           Text(
-            'Sin conexión - Modo offline',
+            titulo,
             style: TextStyle(
-              color: Colors.white,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
+              fontSize: 14,
+              color: Colors.grey[600],
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            valor,
+            style: const TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              color: Colors.black87,
             ),
           ),
         ],

@@ -1,9 +1,17 @@
 // lib/presentacion/pantallas/escaneo_seguimiento_screen.dart
+// ✅ VERSIÓN CORREGIDA
+// CAMBIOS:
+// - _guardarDetecciones: ya no depende de idMazorca para Firestore
+// - _guardarEvaluacionEnFirestore: eliminado imagenPath (fuera del esquema)
+// - _colorPinSegunFase: corregido "naranja" → "amarillo" para severidad 2
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:ultralytics_yolo/ultralytics_yolo.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../logica/servicios/servicio_ia.dart';
 import '../../logica/servicios/servicio_gps.dart';
 import '../../logica/servicios/servicio_sincronizacion.dart';
@@ -13,18 +21,18 @@ import '../../config/constantes.dart';
 import '../../config/tema.dart';
 import 'detalle_deteccion_screen.dart';
 
-/// Pantalla de escaneo para seguimiento de mazorca
-/// Usa YOLOView para detección en tiempo real (igual que EscaneoScreen)
 class EscaneoSeguimientoScreen extends StatefulWidget {
   final String cedulaUsuario;
-  final String idMazorca;
+  final String idMazorca; // en seguimiento, coincide con grupoImagen
   final String grupoImagen;
+  final String? seguimientoId;
 
   const EscaneoSeguimientoScreen({
     super.key,
     required this.cedulaUsuario,
     required this.idMazorca,
     required this.grupoImagen,
+    this.seguimientoId,
   });
 
   @override
@@ -83,16 +91,21 @@ class _EscaneoSeguimientoScreenState extends State<EscaneoSeguimientoScreen> {
     setState(() => _procesando = true);
 
     try {
-      _mostrarDialogoCarga('Procesando...');
+      _mostrarDialogoCarga('Capturando foto...');
 
-      final tempDir = await getTemporaryDirectory();
-      final tempPath =
-          '${tempDir.path}/capture_${DateTime.now().millisecondsSinceEpoch}.jpg';
-      final tempFile = File(tempPath);
+      final XFile? foto = await ImagePicker().pickImage(
+        source: ImageSource.camera,
+        imageQuality: 85,
+        maxWidth: 1280,
+      );
 
-      // TODO: Implementar captura real del frame de YOLOView
-      // Por ahora creamos un archivo vacío
-      await tempFile.writeAsBytes([]);
+      if (foto == null) {
+        if (mounted) Navigator.of(context).pop();
+        setState(() => _procesando = false);
+        return;
+      }
+
+      final imagenFile = File(foto.path);
 
       if (!mounted) return;
       Navigator.of(context).pop();
@@ -100,7 +113,7 @@ class _EscaneoSeguimientoScreenState extends State<EscaneoSeguimientoScreen> {
       _mostrarDialogoCarga('Dibujando anotaciones...');
 
       final imagenAnotada = await _servicioIA.dibujarAnotacionesEnImagen(
-        imagenOriginal: tempFile,
+        imagenOriginal: imagenFile,
         detecciones: _detecciones,
       );
 
@@ -127,7 +140,7 @@ class _EscaneoSeguimientoScreenState extends State<EscaneoSeguimientoScreen> {
       await _guardarDetecciones(File(rutaDestino), coordenadas, direccion);
 
       try {
-        await tempFile.delete();
+        await imagenFile.delete();
       } catch (e) {
         debugPrint('⚠️ Error limpiando: $e');
       }
@@ -149,6 +162,7 @@ class _EscaneoSeguimientoScreenState extends State<EscaneoSeguimientoScreen> {
     try {
       final userAuth = FirebaseAuth.instance.currentUser;
 
+      // Guardar cada detección en SQLite local
       for (var result in _detecciones) {
         final severidad = Constantes.obtenerSeveridadPorClase(result.className);
         final colorSemaforo = Constantes.obtenerColorSemaforo(severidad);
@@ -179,12 +193,37 @@ class _EscaneoSeguimientoScreenState extends State<EscaneoSeguimientoScreen> {
       if (!mounted) return;
       Navigator.of(context).pop();
 
-      if (userAuth != null) {
+      if (userAuth != null && widget.seguimientoId != null) {
+        // Tiene seguimientoId → registrar evaluación en subcolección
+        _mostrarDialogoCarga('Registrando evaluación...');
+        try {
+          await _guardarEvaluacionEnFirestore(
+            imagenFile: imagenFile,
+            uid: userAuth.uid,
+          );
+          if (!mounted) return;
+          Navigator.of(context).pop();
+
+          if (_detecciones.isNotEmpty) {
+            await _mostrarTratamientoRecomendado(_detecciones.first.className);
+          }
+          _mostrarMensaje('✅ Guardado y evaluación registrada');
+        } catch (e) {
+          if (mounted) Navigator.of(context).pop();
+          debugPrint('⚠️ Error guardando evaluación en Firestore: $e');
+          _mostrarMensaje('✅ Guardado localmente. Se sincronizará después');
+        }
+      } else if (userAuth != null) {
+        // Sin seguimientoId → sincronizar normalmente
         _mostrarDialogoCarga('Sincronizando...');
         try {
           await _sincronizacion.sincronizarTodo();
           if (!mounted) return;
           Navigator.of(context).pop();
+
+          if (_detecciones.isNotEmpty) {
+            await _mostrarTratamientoRecomendado(_detecciones.first.className);
+          }
           _mostrarMensaje('✅ Guardado y sincronizado');
         } catch (e) {
           if (!mounted) return;
@@ -207,6 +246,351 @@ class _EscaneoSeguimientoScreenState extends State<EscaneoSeguimientoScreen> {
     } catch (e) {
       if (mounted) Navigator.of(context).pop();
       _mostrarMensaje('Error: $e');
+    }
+  }
+
+  Future<void> _guardarEvaluacionEnFirestore({
+    required File imagenFile,
+    required String uid,
+  }) async {
+    final seguimientoId = widget.seguimientoId!;
+    if (_detecciones.isEmpty) return;
+
+    final result = _detecciones.first;
+    final severidad = Constantes.obtenerSeveridadPorClase(result.className);
+    final confianza = result.confidence;
+
+    // Subir imagen a Storage
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    final storagePath = 'imagenes/seguimientos/$seguimientoId/eval_$ts.jpg';
+    final storageRef = FirebaseStorage.instance.ref(storagePath);
+    await storageRef.putFile(imagenFile);
+    final imagenUrl = await storageRef.getDownloadURL();
+
+    final segRef = FirebaseFirestore.instance.doc(
+      'seguimientos/$seguimientoId',
+    );
+
+    // ✅ Solo campos necesarios, sin imagenPath (fuera del esquema)
+    await segRef.collection('evaluaciones').add({
+      'imagenURL': imagenUrl,
+      'faseDetectada': severidad,
+      'porcentajeInfeccion': confianza * 100,
+      'observaciones': 'Seguimiento de mazorca',
+      'fechaEvaluacion': FieldValue.serverTimestamp(),
+    });
+
+    final Map<String, dynamic> actualizacion = {
+      'faseActual': severidad,
+      'colorPinMapa': _colorPinSegunFase(severidad),
+      'totalEvaluaciones': FieldValue.increment(1),
+      'ultimaEvaluacion': FieldValue.serverTimestamp(),
+    };
+
+    if (severidad == 4) {
+      actualizacion['estado'] = 'perdido';
+    }
+
+    await segRef.update(actualizacion);
+    debugPrint('✅ Evaluación registrada en seguimiento $seguimientoId');
+  }
+
+  // ✅ CORREGIDO: "naranja" → "amarillo" para severidad 2 (igual que constantes.dart)
+  String _colorPinSegunFase(int severidad) {
+    switch (severidad) {
+      case 0:
+        return 'verde';
+      case 1:
+        return 'amarillo';
+      case 2:
+        return 'amarillo'; // ← era "naranja", no existe en el esquema
+      case 3:
+        return 'rojo';
+      default:
+        return 'gris';
+    }
+  }
+
+  Future<void> _mostrarTratamientoRecomendado(String fase) async {
+    try {
+      final tratamiento = await _sincronizacion.obtenerTratamientoRecomendado(
+        fase,
+      );
+
+      if (!mounted) return;
+
+      if (tratamiento == null) {
+        await showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+            title: const Row(
+              children: [
+                Icon(Icons.info_outline, color: Colors.orange, size: 28),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Protocolo no disponible',
+                    style: TextStyle(fontSize: 18),
+                  ),
+                ),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'No se encontró un protocolo de tratamiento para:',
+                  style: TextStyle(fontSize: 14, color: Colors.grey.shade700),
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: TemaApp.verdeClaro.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: TemaApp.verdeSecundario),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 12,
+                        height: 12,
+                        decoration: BoxDecoration(
+                          color: Constantes.obtenerColorPorClase(fase),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          Constantes.obtenerNombreLegible(fase),
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.orange.shade200),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.admin_panel_settings,
+                        color: Colors.orange.shade700,
+                        size: 24,
+                      ),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Text(
+                          'La administradora debe crear este protocolo '
+                          'desde el panel web (sección Tratamientos).',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Entendido'),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+
+      final nombreFase = tratamiento['nombre'] as String? ?? '';
+      final descripcion = tratamiento['descripcion'] as String? ?? '';
+      final acciones = (tratamiento['acciones'] as List?)?.cast<String>() ?? [];
+      final fungicidas =
+          (tratamiento['fungicidas'] as List?)?.cast<String>() ?? [];
+      final urgencia = tratamiento['urgencia'] as String? ?? 'baja';
+
+      await showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: Row(
+            children: [
+              const Icon(
+                Icons.medical_services,
+                color: TemaApp.verdePrimario,
+                size: 28,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Tratamiento: $nombreFase',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 18,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (descripcion.isNotEmpty) ...[
+                  Text(
+                    descripcion,
+                    style: TextStyle(fontSize: 14, color: Colors.grey.shade700),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: _getUrgenciaColor(urgencia).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.warning_amber,
+                        color: _getUrgenciaColor(urgencia),
+                        size: 24,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Urgencia: ${urgencia.toUpperCase()}',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: _getUrgenciaColor(urgencia),
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (acciones.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  const Text(
+                    'ACCIONES DE CAMPO:',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                      color: Colors.grey,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  ...acciones.map(
+                    (accion) => Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            '✓ ',
+                            style: TextStyle(
+                              color: TemaApp.verdePrimario,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                          Expanded(
+                            child: Text(
+                              accion,
+                              style: const TextStyle(fontSize: 13),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+                if (fungicidas.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  const Text(
+                    'SUGERENCIAS QUÍMICAS:',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                      color: Colors.grey,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: fungicidas
+                        .map(
+                          (f) => Chip(
+                            label: Text(
+                              f,
+                              style: const TextStyle(fontSize: 11),
+                            ),
+                            backgroundColor: TemaApp.verdeClaro,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                          ),
+                        )
+                        .toList(),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              style: TextButton.styleFrom(
+                foregroundColor: TemaApp.verdePrimario,
+              ),
+              child: const Text(
+                'Entendido',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      debugPrint('❌ Error mostrando tratamiento: $e');
+    }
+  }
+
+  Color _getUrgenciaColor(String urgencia) {
+    switch (urgencia.toLowerCase()) {
+      case 'crítica':
+      case 'critica':
+        return Colors.red;
+      case 'alta':
+        return Colors.orange;
+      case 'media':
+        return Colors.amber;
+      default:
+        return Colors.green;
     }
   }
 
@@ -265,7 +649,7 @@ class _EscaneoSeguimientoScreenState extends State<EscaneoSeguimientoScreen> {
             children: [
               CircularProgressIndicator(),
               SizedBox(height: 16),
-              Text('Cargando modelo YOLO26...'),
+              Text('Cargando modelo YOLO...'),
             ],
           ),
         ),
@@ -292,7 +676,10 @@ class _EscaneoSeguimientoScreenState extends State<EscaneoSeguimientoScreen> {
                 const Icon(Icons.timeline, size: 16, color: Colors.white),
                 const SizedBox(width: 6),
                 Text(
-                  widget.idMazorca.substring(0, 8),
+                  widget.idMazorca.substring(
+                    0,
+                    widget.idMazorca.length > 8 ? 8 : widget.idMazorca.length,
+                  ),
                   style: const TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.bold,

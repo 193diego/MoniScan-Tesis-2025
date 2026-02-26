@@ -1,195 +1,168 @@
 // lib/presentacion/pantallas/perfil_screen.dart
+// ✅ CON BOTÓN CERRAR SESIÓN Y ANIMACIONES
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import '../../datos/local/base_datos_helper.dart';
-import '../../datos/modelos/usuario.dart';
 import '../../config/tema.dart';
-import '../widgets/widgets_comunes.dart';
-import 'login_firebase_screen.dart';
 
 class PerfilScreen extends StatefulWidget {
   final String cedulaUsuario;
+
   const PerfilScreen({super.key, required this.cedulaUsuario});
 
   @override
   State<PerfilScreen> createState() => _PerfilScreenState();
 }
 
-class _PerfilScreenState extends State<PerfilScreen> {
-  final BaseDatosHelper _bd = BaseDatosHelper();
+class _PerfilScreenState extends State<PerfilScreen>
+    with SingleTickerProviderStateMixin {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseStorage _storage = FirebaseStorage.instance;
+
+  late AnimationController _animationController;
+  late Animation<double> _fadeAnimation;
+
+  bool _cargando = true;
+  bool _editando = false;
+  bool _subiendoFoto = false;
 
   final _nombreController = TextEditingController();
   final _telefonoController = TextEditingController();
   final _direccionController = TextEditingController();
 
-  Usuario? _usuario;
-  Map<String, dynamic>? _datosFirestore;
-
-  bool _cargando = true;
-  bool _subiendoFoto = false;
-  bool _guardando = false;
-
-  String? _urlFotoActual;
+  Map<String, dynamic>? _datosUsuario;
+  String? _fotoPerfilUrl;
 
   @override
   void initState() {
     super.initState();
-    _cargarDatos();
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    );
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
+    );
+    _cargarDatosUsuario();
   }
 
-  Future<void> _cargarDatos() async {
+  Future<void> _cargarDatosUsuario() async {
     setState(() => _cargando = true);
 
     try {
-      final usuario = await _bd.obtenerUsuarioPorCedula(widget.cedulaUsuario);
       final uid = _auth.currentUser?.uid;
-
-      Map<String, dynamic>? datosFirestore;
-      String? urlFoto;
-
-      if (uid != null) {
-        final doc = await _firestore.collection('workers').doc(uid).get();
-        if (doc.exists) {
-          datosFirestore = doc.data();
-
-          // EXTRAER URL DE FOTO
-          urlFoto = datosFirestore?['avatar'] as String?;
-
-          _nombreController.text = datosFirestore?['name'] ?? '';
-          _telefonoController.text = datosFirestore?['phone'] ?? '';
-          _direccionController.text = datosFirestore?['address'] ?? '';
-        }
+      if (uid == null) {
+        _mostrarError('Usuario no autenticado');
+        return;
       }
 
-      if (!mounted) return;
+      final doc = await _firestore.collection('usuarios').doc(uid).get();
+
+      if (!doc.exists) {
+        _mostrarError('Usuario no encontrado en Firestore');
+        return;
+      }
+
+      final datos = doc.data()!;
 
       setState(() {
-        _usuario = usuario;
-        _datosFirestore = datosFirestore;
-        _urlFotoActual = urlFoto;
+        _datosUsuario = datos;
+        _fotoPerfilUrl = datos['fotoPerfilURL'] as String?;
+        _nombreController.text = datos['nombreCompleto'] ?? '';
+        _telefonoController.text = datos['telefono'] ?? '';
+        _direccionController.text = datos['direccion'] ?? '';
         _cargando = false;
       });
+
+      _animationController.forward();
     } catch (e) {
       debugPrint('❌ Error cargando perfil: $e');
-      if (mounted) setState(() => _cargando = false);
+      if (mounted) {
+        setState(() => _cargando = false);
+        _mostrarError('Error al cargar perfil: $e');
+      }
     }
   }
 
-  Future<void> _cambiarFoto() async {
-    if (_subiendoFoto) return;
-
-    final ImagePicker picker = ImagePicker();
-    final XFile? imagen = await picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 70,
-      maxWidth: 800,
-      maxHeight: 800,
-    );
-
-    if (imagen == null) return;
-
-    setState(() => _subiendoFoto = true);
-
+  Future<void> _cambiarFotoPerfil() async {
     try {
-      final uid = _auth.currentUser!.uid;
-      final file = File(imagen.path);
-      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final ImagePicker picker = ImagePicker();
+      final XFile? imagen = await picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 70,
+        maxWidth: 800,
+        maxHeight: 800,
+      );
 
+      if (imagen == null) return;
+
+      setState(() => _subiendoFoto = true);
+
+      final uid = _auth.currentUser!.uid;
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
       final rutaStorage = 'perfiles/$uid/perfil_$timestamp.jpg';
-      debugPrint('📤 Subiendo foto a: $rutaStorage');
 
       final storageRef = _storage.ref().child(rutaStorage);
+      await storageRef.putFile(File(imagen.path));
+      final downloadUrl = await storageRef.getDownloadURL();
 
-      // Invalidar caché anterior
-      if (_urlFotoActual != null && _urlFotoActual!.isNotEmpty) {
-        await CachedNetworkImage.evictFromCache(_urlFotoActual!);
-      }
-
-      final uploadTask = storageRef.putFile(
-        file,
-        SettableMetadata(contentType: 'image/jpeg'),
-      );
-      final snapshot = await uploadTask.whenComplete(() {});
-      final downloadUrl = await snapshot.ref.getDownloadURL();
-
-      debugPrint('✅ Foto subida: $downloadUrl');
-
-      // Actualizar Firestore
-      await _firestore.collection('workers').doc(uid).update({
-        'avatar': downloadUrl,
-        'updatedAt': FieldValue.serverTimestamp(),
+      await _firestore.collection('usuarios').doc(uid).update({
+        'fotoPerfilURL': downloadUrl,
+        'actualizadoEn': FieldValue.serverTimestamp(),
       });
 
-      // Actualizar SQLite
-      if (_usuario != null) {
-        final usuarioActualizado = _usuario!.copiarCon(rutaFoto: downloadUrl);
-        await _bd.actualizarUsuario(usuarioActualizado);
-      }
+      setState(() {
+        _fotoPerfilUrl = downloadUrl;
+        _subiendoFoto = false;
+      });
 
-      // Recargar datos
-      await _cargarDatos();
-
-      if (mounted) _mostrarMensaje('✅ Foto actualizada correctamente');
+      _mostrarMensaje('✅ Foto actualizada correctamente');
     } catch (e) {
-      debugPrint('❌ Error subiendo foto: $e');
-      if (mounted)
-        _mostrarError('Error al actualizar la foto: ${e.toString()}');
-    } finally {
-      if (mounted) setState(() => _subiendoFoto = false);
+      debugPrint('❌ Error cambiando foto: $e');
+      setState(() => _subiendoFoto = false);
+      _mostrarError('Error al cambiar foto: $e');
     }
   }
 
   Future<void> _guardarCambios() async {
-    if (_guardando) return;
-
-    setState(() => _guardando = true);
-
     try {
-      final uid = _auth.currentUser?.uid;
-      if (uid == null) throw Exception('Usuario no autenticado');
+      final uid = _auth.currentUser!.uid;
 
-      await _firestore.collection('workers').doc(uid).update({
-        'name': _nombreController.text.trim(),
-        'phone': _telefonoController.text.trim(),
-        'address': _direccionController.text.trim(),
-        'updatedAt': FieldValue.serverTimestamp(),
+      await _firestore.collection('usuarios').doc(uid).update({
+        'nombreCompleto': _nombreController.text.trim(),
+        'telefono': _telefonoController.text.trim(),
+        'direccion': _direccionController.text.trim(),
+        'actualizadoEn': FieldValue.serverTimestamp(),
       });
 
-      if (_usuario != null) {
-        final usuarioActualizado = _usuario!.copiarCon(
-          nombres: _nombreController.text.trim(),
-          direccion: _direccionController.text.trim(),
-        );
-        await _bd.actualizarUsuario(usuarioActualizado);
-      }
-
-      if (mounted) {
-        _mostrarMensaje('✅ Perfil actualizado correctamente');
-        await _cargarDatos();
-      }
+      setState(() => _editando = false);
+      _mostrarMensaje('✅ Perfil actualizado correctamente');
+      _cargarDatosUsuario();
     } catch (e) {
       debugPrint('❌ Error guardando cambios: $e');
-      if (mounted) _mostrarError('Error al guardar: ${e.toString()}');
-    } finally {
-      if (mounted) setState(() => _guardando = false);
+      _mostrarError('Error al guardar: $e');
     }
   }
 
+  // ✅ CERRAR SESIÓN
   Future<void> _cerrarSesion() async {
     final confirmar = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Cerrar Sesión'),
-        content: const Text('¿Estás seguro que deseas cerrar sesión?'),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.logout, color: Colors.red),
+            SizedBox(width: 12),
+            Text('Cerrar sesión'),
+          ],
+        ),
+        content: const Text('¿Estás seguro de que deseas cerrar sesión?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -197,36 +170,33 @@ class _PerfilScreenState extends State<PerfilScreen> {
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Cerrar Sesión'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Cerrar sesión'),
           ),
         ],
       ),
     );
 
-    if (confirmar != true) return;
-
-    try {
+    if (confirmar == true) {
       await _auth.signOut();
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.clear();
-
       if (mounted) {
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const LoginFirebaseScreen()),
-          (route) => false,
-        );
+        Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
       }
-    } catch (e) {
-      debugPrint('❌ Error cerrando sesión: $e');
-      if (mounted) _mostrarError('Error al cerrar sesión');
     }
   }
 
   void _mostrarMensaje(String mensaje) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(mensaje), behavior: SnackBarBehavior.floating),
+      SnackBar(
+        content: Text(mensaje),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        backgroundColor: TemaApp.verdeSecundario,
+      ),
     );
   }
 
@@ -234,15 +204,23 @@ class _PerfilScreenState extends State<PerfilScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(mensaje),
+        content: Row(
+          children: [
+            const Icon(Icons.error_outline, color: Colors.white),
+            const SizedBox(width: 12),
+            Expanded(child: Text(mensaje)),
+          ],
+        ),
         backgroundColor: Colors.red,
         behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
   }
 
   @override
   void dispose() {
+    _animationController.dispose();
     _nombreController.dispose();
     _telefonoController.dispose();
     _direccionController.dispose();
@@ -252,116 +230,130 @@ class _PerfilScreenState extends State<PerfilScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: TemaApp.colorFondo,
       appBar: AppBar(
-        title: const Text('Mi Perfil'),
-        centerTitle: true,
+        title: const Text(
+          'Mi Perfil',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         backgroundColor: TemaApp.verdePrimario,
         elevation: 0,
+        actions: [
+          if (!_editando && !_cargando)
+            IconButton(
+              icon: const Icon(Icons.edit, color: Colors.white),
+              tooltip: 'Editar perfil',
+              onPressed: () => setState(() => _editando = true),
+            ),
+        ],
       ),
       body: _cargando
-          ? const IndicadorCarga(mensaje: 'Cargando perfil...')
-          : _usuario == null
-          ? const MensajeVacio(
-              icono: Icons.error,
-              mensaje: 'Error al cargar perfil',
+          ? const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(color: TemaApp.verdePrimario),
+                  SizedBox(height: 16),
+                  Text('Cargando perfil...'),
+                ],
+              ),
             )
-          : RefreshIndicator(
-              onRefresh: _cargarDatos,
+          : FadeTransition(
+              opacity: _fadeAnimation,
               child: SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
                 child: Column(
                   children: [
-                    // HEADER CON DEGRADADO
+                    // HEADER CON FOTO
                     Container(
                       width: double.infinity,
                       decoration: const BoxDecoration(
-                        gradient: TemaApp.degradadoVerde,
+                        color: TemaApp.verdePrimario,
                         borderRadius: BorderRadius.only(
-                          bottomLeft: Radius.circular(30),
-                          bottomRight: Radius.circular(30),
+                          bottomLeft: Radius.circular(32),
+                          bottomRight: Radius.circular(32),
                         ),
                       ),
-                      padding: const EdgeInsets.symmetric(vertical: 40),
+                      padding: const EdgeInsets.only(bottom: 40),
                       child: Column(
                         children: [
-                          // AVATAR
+                          const SizedBox(height: 20),
                           Stack(
                             children: [
-                              Container(
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: Colors.white,
-                                    width: 4,
-                                  ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withValues(
-                                        alpha: 0.2,
-                                      ),
-                                      blurRadius: 10,
-                                      offset: const Offset(0, 5),
+                              Hero(
+                                tag: 'foto_perfil',
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: Colors.white,
+                                      width: 4,
                                     ),
-                                  ],
-                                ),
-                                child: CircleAvatar(
-                                  radius: 60,
-                                  backgroundColor: Colors.white,
-                                  backgroundImage:
-                                      _urlFotoActual != null &&
-                                          _urlFotoActual!.isNotEmpty
-                                      ? CachedNetworkImageProvider(
-                                          _urlFotoActual!,
-                                        )
-                                      : null,
-                                  child:
-                                      _urlFotoActual == null ||
-                                          _urlFotoActual!.isEmpty
-                                      ? const Icon(
-                                          Icons.person,
-                                          size: 60,
-                                          color: TemaApp.verdePrimario,
-                                        )
-                                      : null,
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withOpacity(0.2),
+                                        blurRadius: 20,
+                                        offset: const Offset(0, 10),
+                                      ),
+                                    ],
+                                  ),
+                                  child: CircleAvatar(
+                                    radius: 70,
+                                    backgroundColor: Colors.white,
+                                    child: _subiendoFoto
+                                        ? const CircularProgressIndicator(
+                                            color: TemaApp.verdePrimario,
+                                          )
+                                        : _fotoPerfilUrl != null
+                                        ? ClipOval(
+                                            child: CachedNetworkImage(
+                                              imageUrl: _fotoPerfilUrl!,
+                                              width: 140,
+                                              height: 140,
+                                              fit: BoxFit.cover,
+                                              placeholder: (context, url) =>
+                                                  const CircularProgressIndicator(
+                                                    color:
+                                                        TemaApp.verdePrimario,
+                                                  ),
+                                              errorWidget:
+                                                  (context, url, error) => Icon(
+                                                    Icons.person,
+                                                    size: 70,
+                                                    color: Colors.grey.shade400,
+                                                  ),
+                                            ),
+                                          )
+                                        : Icon(
+                                            Icons.person,
+                                            size: 70,
+                                            color: Colors.grey.shade400,
+                                          ),
+                                  ),
                                 ),
                               ),
-                              if (_subiendoFoto)
-                                Positioned.fill(
-                                  child: Container(
-                                    decoration: const BoxDecoration(
-                                      color: Colors.black54,
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: const Center(
-                                      child: CircularProgressIndicator(
-                                        color: Colors.white,
-                                      ),
-                                    ),
-                                  ),
-                                ),
                               Positioned(
                                 bottom: 0,
                                 right: 0,
                                 child: GestureDetector(
-                                  onTap: _subiendoFoto ? null : _cambiarFoto,
+                                  onTap: _subiendoFoto
+                                      ? null
+                                      : _cambiarFotoPerfil,
                                   child: Container(
-                                    padding: const EdgeInsets.all(10),
+                                    padding: const EdgeInsets.all(12),
                                     decoration: BoxDecoration(
                                       color: Colors.white,
                                       shape: BoxShape.circle,
                                       boxShadow: [
                                         BoxShadow(
-                                          color: Colors.black.withValues(
-                                            alpha: 0.2,
-                                          ),
+                                          color: Colors.black.withOpacity(0.2),
                                           blurRadius: 8,
                                         ),
                                       ],
                                     ),
                                     child: const Icon(
                                       Icons.camera_alt,
-                                      size: 20,
                                       color: TemaApp.verdePrimario,
+                                      size: 20,
                                     ),
                                   ),
                                 ),
@@ -370,167 +362,151 @@ class _PerfilScreenState extends State<PerfilScreen> {
                           ),
                           const SizedBox(height: 16),
                           Text(
-                            _datosFirestore?['name'] ?? 'Usuario',
+                            _datosUsuario?['nombreCompleto'] ?? 'Sin nombre',
                             style: const TextStyle(
-                              color: Colors.white,
                               fontSize: 24,
                               fontWeight: FontWeight.bold,
+                              color: Colors.white,
                             ),
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            _datosFirestore?['email'] ?? '',
+                            _datosUsuario?['correo'] ?? 'Sin correo',
                             style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.9),
                               fontSize: 14,
+                              color: Colors.white.withOpacity(0.9),
                             ),
                           ),
                         ],
                       ),
                     ),
 
-                    // CONTENIDO
+                    const SizedBox(height: 24),
+
                     Padding(
-                      padding: const EdgeInsets.all(24),
+                      padding: const EdgeInsets.all(20),
                       child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // INFORMACIÓN FIJA
-                          const Text(
-                            'Información Fija',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
                           _buildInfoCard(
-                            Icons.badge,
-                            'Cédula',
-                            _datosFirestore?['cedula'] ?? _usuario!.cedula,
+                            icon: Icons.badge,
+                            titulo: 'Cédula',
+                            contenido: _datosUsuario?['cedula'] ?? 'N/A',
+                            editable: false,
                           ),
+                          const SizedBox(height: 12),
                           _buildInfoCard(
-                            Icons.work,
-                            'Rol',
-                            _datosFirestore?['role'] ?? 'N/A',
+                            icon: Icons.person_outline,
+                            titulo: 'Nombre completo',
+                            contenido: _nombreController.text,
+                            editable: true,
+                            controller: _nombreController,
                           ),
+                          const SizedBox(height: 12),
                           _buildInfoCard(
-                            Icons.verified,
-                            'Estado',
-                            _datosFirestore?['status'] ?? 'N/A',
+                            icon: Icons.email_outlined,
+                            titulo: 'Correo electrónico',
+                            contenido: _datosUsuario?['correo'] ?? 'N/A',
+                            editable: false,
+                          ),
+                          const SizedBox(height: 12),
+                          _buildInfoCard(
+                            icon: Icons.phone_outlined,
+                            titulo: 'Teléfono',
+                            contenido: _telefonoController.text,
+                            editable: true,
+                            controller: _telefonoController,
+                          ),
+                          const SizedBox(height: 12),
+                          _buildInfoCard(
+                            icon: Icons.location_on_outlined,
+                            titulo: 'Dirección',
+                            contenido: _direccionController.text,
+                            editable: true,
+                            controller: _direccionController,
+                          ),
+                          const SizedBox(height: 12),
+                          _buildInfoCard(
+                            icon: Icons.work_outline,
+                            titulo: 'Rol',
+                            contenido: _datosUsuario?['rol'] == 'admin'
+                                ? 'Administrador'
+                                : 'Trabajador',
+                            editable: false,
                           ),
 
-                          const SizedBox(height: 32),
-
-                          // INFORMACIÓN EDITABLE
-                          const Text(
-                            'Información Editable',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-
-                          CampoTextoPersonalizado(
-                            controlador: _nombreController,
-                            etiqueta: 'Nombre Completo *',
-                            pista: 'Ingresa tu nombre',
-                            icono: Icons.person,
-                          ),
-                          const SizedBox(height: 16),
-
-                          CampoTextoPersonalizado(
-                            controlador: _telefonoController,
-                            etiqueta: 'Teléfono',
-                            pista: 'Ej: 0987654321',
-                            icono: Icons.phone,
-                            tipoTeclado: TextInputType.phone,
-                          ),
-                          const SizedBox(height: 16),
-
-                          CampoTextoPersonalizado(
-                            controlador: _direccionController,
-                            etiqueta: 'Dirección',
-                            pista: 'Ingresa tu dirección',
-                            icono: Icons.home,
-                            lineasMaximas: 2,
-                          ),
-                          const SizedBox(height: 24),
-
-                          // BOTÓN GUARDAR
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton.icon(
-                              onPressed: _guardando ? null : _guardarCambios,
-                              icon: _guardando
-                                  ? const SizedBox(
-                                      width: 20,
-                                      height: 20,
-                                      child: CircularProgressIndicator(
-                                        color: Colors.white,
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  : const Icon(Icons.save),
-                              label: Text(
-                                _guardando ? 'Guardando...' : 'Guardar Cambios',
-                              ),
-                              style: ElevatedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 16,
-                                ),
-                                backgroundColor: TemaApp.verdePrimario,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-
-                          // NOTA
-                          Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: Colors.blue.shade50,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.blue.shade200),
-                            ),
-                            child: Row(
+                          if (_editando) ...[
+                            const SizedBox(height: 32),
+                            Row(
                               children: [
-                                Icon(
-                                  Icons.info_outline,
-                                  color: Colors.blue.shade700,
-                                  size: 20,
-                                ),
-                                const SizedBox(width: 12),
                                 Expanded(
-                                  child: Text(
-                                    'Solo puedes cambiar tu foto, nombre, teléfono y dirección. Para otros cambios, contacta al administrador.',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.blue.shade700,
+                                  child: OutlinedButton(
+                                    onPressed: () {
+                                      setState(() {
+                                        _editando = false;
+                                        _cargarDatosUsuario();
+                                      });
+                                    },
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: Colors.grey.shade700,
+                                      side: BorderSide(
+                                        color: Colors.grey.shade300,
+                                      ),
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 16,
+                                      ),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
                                     ),
+                                    child: const Text('Cancelar'),
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: ElevatedButton(
+                                    onPressed: _guardarCambios,
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: TemaApp.verdePrimario,
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 16,
+                                      ),
+                                      elevation: 0,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                    ),
+                                    child: const Text('Guardar cambios'),
                                   ),
                                 ),
                               ],
                             ),
-                          ),
-                          const SizedBox(height: 32),
+                          ],
 
-                          // BOTÓN CERRAR SESIÓN
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton.icon(
-                              onPressed: _cerrarSesion,
-                              icon: const Icon(Icons.logout),
-                              label: const Text('Cerrar Sesión'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.red,
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 16,
+                          // ✅ BOTÓN CERRAR SESIÓN
+                          if (!_editando) ...[
+                            const SizedBox(height: 32),
+                            SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton.icon(
+                                onPressed: _cerrarSesion,
+                                icon: const Icon(Icons.logout),
+                                label: const Text('Cerrar sesión'),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.red,
+                                  side: const BorderSide(color: Colors.red),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 16,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
+                          ],
+
+                          const SizedBox(height: 32),
                         ],
                       ),
                     ),
@@ -541,38 +517,78 @@ class _PerfilScreenState extends State<PerfilScreen> {
     );
   }
 
-  Widget _buildInfoCard(IconData icono, String label, String value) {
+  Widget _buildInfoCard({
+    required IconData icon,
+    required String titulo,
+    required String contenido,
+    required bool editable,
+    TextEditingController? controller,
+  }) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.grey[100],
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[300]!),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Row(
         children: [
-          Icon(icono, size: 24, color: TemaApp.verdePrimario),
-          const SizedBox(width: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: TemaApp.verdeClaro.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: TemaApp.verdePrimario, size: 24),
+          ),
+          const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  label,
-                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  value,
-                  style: const TextStyle(
-                    fontSize: 16,
+                  titulo,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey.shade600,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
+                const SizedBox(height: 4),
+                if (_editando && editable && controller != null)
+                  TextField(
+                    controller: controller,
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      contentPadding: EdgeInsets.zero,
+                      border: InputBorder.none,
+                    ),
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.black87,
+                    ),
+                  )
+                else
+                  Text(
+                    contenido.isEmpty ? 'No especificado' : contenido,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.black87,
+                    ),
+                  ),
               ],
             ),
           ),
+          if (editable && !_editando)
+            Icon(Icons.chevron_right, color: Colors.grey.shade400),
         ],
       ),
     );

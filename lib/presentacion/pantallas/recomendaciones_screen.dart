@@ -7,12 +7,9 @@ import '../../config/tema.dart';
 import '../widgets/widgets_comunes.dart';
 
 class RecomendacionesScreen extends StatefulWidget {
-  final String? fase; // Opcional: si viene de una detección específica
+  final String? fase;
 
-  const RecomendacionesScreen({
-    super.key,
-    this.fase,
-  });
+  const RecomendacionesScreen({super.key, this.fase});
 
   @override
   State<RecomendacionesScreen> createState() => _RecomendacionesScreenState();
@@ -20,7 +17,7 @@ class RecomendacionesScreen extends StatefulWidget {
 
 class _RecomendacionesScreenState extends State<RecomendacionesScreen> {
   final ServicioRecomendaciones _servicio = ServicioRecomendaciones();
-  
+
   List<Recomendacion> _recomendaciones = [];
   bool _cargando = true;
   String? _faseSeleccionada;
@@ -60,39 +57,37 @@ class _RecomendacionesScreenState extends State<RecomendacionesScreen> {
           children: [
             const Text(
               'Filtrar por Fase',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
             Wrap(
               spacing: 8,
               runSpacing: 8,
-              children: [
-                'Todas',
-                'Sana',
-                'Fase Temprana',
-                'Fase Intermedia',
-                'Fase Avanzada',
-                'Fase Crítica',
-              ].map((fase) {
-                final estaSeleccionada = fase == 'Todas'
-                    ? _faseSeleccionada == null
-                    : _faseSeleccionada == fase;
+              children:
+                  [
+                    'Todas',
+                    'Sana',
+                    'Fase Temprana',
+                    'Fase Intermedia',
+                    'Fase Avanzada',
+                    'Fase Crítica',
+                  ].map((fase) {
+                    final estaSeleccionada = fase == 'Todas'
+                        ? _faseSeleccionada == null
+                        : _faseSeleccionada == fase;
 
-                return ChoiceChip(
-                  label: Text(fase),
-                  selected: estaSeleccionada,
-                  onSelected: (selected) {
-                    setState(() {
-                      _faseSeleccionada = fase == 'Todas' ? null : fase;
-                    });
-                    Navigator.pop(context);
-                    _cargarRecomendaciones();
-                  },
-                );
-              }).toList(),
+                    return ChoiceChip(
+                      label: Text(fase),
+                      selected: estaSeleccionada,
+                      onSelected: (selected) {
+                        setState(() {
+                          _faseSeleccionada = fase == 'Todas' ? null : fase;
+                        });
+                        Navigator.pop(context);
+                        _cargarRecomendaciones();
+                      },
+                    );
+                  }).toList(),
             ),
           ],
         ),
@@ -120,36 +115,34 @@ class _RecomendacionesScreenState extends State<RecomendacionesScreen> {
       body: _cargando
           ? const IndicadorCarga(mensaje: 'Cargando recomendaciones...')
           : _recomendaciones.isEmpty
-              ? const MensajeVacio(
-                  icono: Icons.lightbulb_outline,
-                  mensaje: 'No hay recomendaciones',
-                  subtitulo: 'Selecciona una fase para ver recomendaciones',
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: _recomendaciones.length,
-                  itemBuilder: (context, index) {
-                    final recomendacion = _recomendaciones[index];
-                    return _TarjetaRecomendacion(
-                      recomendacion: recomendacion,
-                      onTap: () => _mostrarDetalle(recomendacion),
-                    );
-                  },
-                ),
+          ? const MensajeVacio(
+              icono: Icons.lightbulb_outline,
+              mensaje: 'No hay recomendaciones',
+              subtitulo: 'Selecciona una fase para ver recomendaciones',
+            )
+          : ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: _recomendaciones.length,
+              itemBuilder: (context, index) {
+                final recomendacion = _recomendaciones[index];
+                return _TarjetaRecomendacion(
+                  recomendacion: recomendacion,
+                  onTap: () => _mostrarDetalle(recomendacion),
+                );
+              },
+            ),
     );
   }
 
   void _mostrarDetalle(Recomendacion recomendacion) {
     showDialog(
       context: context,
-      builder: (context) => _DialogoDetalleRecomendacion(
-        recomendacion: recomendacion,
-      ),
+      builder: (context) =>
+          _DialogoDetalleRecomendacion(recomendacion: recomendacion),
     );
   }
 }
 
-/// Tarjeta de recomendación
 class _TarjetaRecomendacion extends StatelessWidget {
   final Recomendacion recomendacion;
   final VoidCallback onTap;
@@ -171,17 +164,18 @@ class _TarjetaRecomendacion extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Header
               Row(
                 children: [
-                  // Prioridad
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 8,
                       vertical: 4,
                     ),
                     decoration: BoxDecoration(
-                      color: recomendacion.colorPrioridad.withOpacity(0.1),
+                      // ✅ CORRECCIÓN: withValues() reemplaza withOpacity() (deprecated)
+                      color: recomendacion.colorPrioridad.withValues(
+                        alpha: 0.1,
+                      ),
                       borderRadius: BorderRadius.circular(6),
                       border: Border.all(
                         color: recomendacion.colorPrioridad,
@@ -198,17 +192,10 @@ class _TarjetaRecomendacion extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  
-                  // Fase
-                  EtiquetaFase(
-                    fase: recomendacion.fase,
-                    tamanoTexto: 11,
-                  ),
+                  EtiquetaFase(fase: recomendacion.fase, tamanoTexto: 11),
                 ],
               ),
               const SizedBox(height: 12),
-
-              // Título
               Text(
                 recomendacion.titulo,
                 style: const TextStyle(
@@ -217,23 +204,16 @@ class _TarjetaRecomendacion extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 8),
-
-              // Descripción
               Text(
                 recomendacion.descripcion,
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey[700],
-                ),
+                style: TextStyle(fontSize: 14, color: Colors.grey[700]),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
               const SizedBox(height: 12),
-
-              // Número de acciones
               Row(
                 children: [
-                  Icon(
+                  const Icon(
                     Icons.checklist,
                     size: 16,
                     color: TemaApp.verdePrimario,
@@ -241,7 +221,7 @@ class _TarjetaRecomendacion extends StatelessWidget {
                   const SizedBox(width: 4),
                   Text(
                     '${recomendacion.acciones.length} acciones recomendadas',
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontSize: 13,
                       color: TemaApp.verdePrimario,
                       fontWeight: FontWeight.w500,
@@ -263,13 +243,10 @@ class _TarjetaRecomendacion extends StatelessWidget {
   }
 }
 
-/// Diálogo de detalle de recomendación
 class _DialogoDetalleRecomendacion extends StatelessWidget {
   final Recomendacion recomendacion;
 
-  const _DialogoDetalleRecomendacion({
-    required this.recomendacion,
-  });
+  const _DialogoDetalleRecomendacion({required this.recomendacion});
 
   @override
   Widget build(BuildContext context) {
@@ -279,7 +256,6 @@ class _DialogoDetalleRecomendacion extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Imagen (si existe)
             if (recomendacion.urlImagen != null)
               ClipRRect(
                 borderRadius: const BorderRadius.only(
@@ -299,13 +275,11 @@ class _DialogoDetalleRecomendacion extends StatelessWidget {
                 ),
               ),
 
-            // Contenido
             Padding(
               padding: const EdgeInsets.all(20),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Prioridad y Fase
                   Row(
                     children: [
                       Container(
@@ -314,7 +288,10 @@ class _DialogoDetalleRecomendacion extends StatelessWidget {
                           vertical: 6,
                         ),
                         decoration: BoxDecoration(
-                          color: recomendacion.colorPrioridad.withOpacity(0.1),
+                          // ✅ CORRECCIÓN: withValues() reemplaza withOpacity() (deprecated)
+                          color: recomendacion.colorPrioridad.withValues(
+                            alpha: 0.1,
+                          ),
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
                             color: recomendacion.colorPrioridad,
@@ -331,15 +308,11 @@ class _DialogoDetalleRecomendacion extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      EtiquetaFase(
-                        fase: recomendacion.fase,
-                        tamanoTexto: 12,
-                      ),
+                      EtiquetaFase(fase: recomendacion.fase, tamanoTexto: 12),
                     ],
                   ),
                   const SizedBox(height: 16),
 
-                  // Título
                   Text(
                     recomendacion.titulo,
                     style: const TextStyle(
@@ -349,7 +322,6 @@ class _DialogoDetalleRecomendacion extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
 
-                  // Descripción
                   Text(
                     recomendacion.descripcion,
                     style: TextStyle(
@@ -360,20 +332,17 @@ class _DialogoDetalleRecomendacion extends StatelessWidget {
                   ),
                   const SizedBox(height: 20),
 
-                  // Acciones
                   const Text(
                     'Acciones Recomendadas:',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 12),
 
+                  // ✅ CORRECCIÓN: Se eliminó .toList() innecesario en spread
                   ...recomendacion.acciones.asMap().entries.map((entry) {
                     final index = entry.key;
                     final accion = entry.value;
-                    
+
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 12),
                       child: Row(
@@ -382,7 +351,7 @@ class _DialogoDetalleRecomendacion extends StatelessWidget {
                           Container(
                             width: 24,
                             height: 24,
-                            decoration: BoxDecoration(
+                            decoration: const BoxDecoration(
                               color: TemaApp.verdePrimario,
                               shape: BoxShape.circle,
                             ),
@@ -401,20 +370,16 @@ class _DialogoDetalleRecomendacion extends StatelessWidget {
                           Expanded(
                             child: Text(
                               accion,
-                              style: const TextStyle(
-                                fontSize: 14,
-                                height: 1.4,
-                              ),
+                              style: const TextStyle(fontSize: 14, height: 1.4),
                             ),
                           ),
                         ],
                       ),
                     );
-                  }).toList(),
+                  }),
 
                   const SizedBox(height: 20),
 
-                  // Botón cerrar
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(

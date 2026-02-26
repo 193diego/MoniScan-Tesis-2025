@@ -1,13 +1,12 @@
+// lib/config/tema.dart
 import 'package:flutter/material.dart';
 
 /// Tema visual profesional con colores agrícolas para MoniScan
 class TemaApp {
   // Paleta de colores principal (tonos verdes agrícolas)
-  static const Color verdePrimario = Color(
-    0xFF2E7D32,
-  ); // Verde oscuro profesional
-  static const Color verdeSecundario = Color(0xFF4CAF50); // Verde medio
-  static const Color verdeClaro = Color(0xFF81C784); // Verde claro
+  static const Color verdePrimario = Color(0xFF2E7D32);
+  static const Color verdeSecundario = Color(0xFF4CAF50);
+  static const Color verdeClaro = Color(0xFF81C784);
   static const Color verdeAcento = Color(0xFF66BB6A);
 
   // Colores de soporte
@@ -36,13 +35,15 @@ class TemaApp {
         primary: verdePrimario,
         secondary: verdeSecundario,
         tertiary: verdeAcento,
+        // ✅ CORRECCIÓN: 'surface' reemplaza 'background' (deprecated desde v3.18)
         surface: colorTarjeta,
-        background: colorFondo,
+        // ✅ CORRECCIÓN: 'surfaceContainerHighest' para el fondo de la app
+        surfaceContainerHighest: colorFondo,
         error: colorError,
         onPrimary: Colors.white,
         onSecondary: Colors.white,
+        // ✅ CORRECCIÓN: 'onSurface' reemplaza 'onBackground' (deprecated desde v3.18)
         onSurface: colorTexto,
-        onBackground: colorTexto,
         onError: Colors.white,
       ),
 
@@ -181,7 +182,8 @@ class TemaApp {
       border: Border.all(color: Colors.grey[300]!),
       boxShadow: [
         BoxShadow(
-          color: Colors.black.withOpacity(0.05),
+          // ✅ CORRECCIÓN: withValues() reemplaza withOpacity() (deprecated)
+          color: Colors.black.withValues(alpha: 0.05),
           blurRadius: 8,
           offset: const Offset(0, 2),
         ),

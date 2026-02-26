@@ -1,12 +1,20 @@
 // lib/logica/servicios/servicio_sincronizacion.dart
+// ✅ VERSIÓN CORREGIDA — SINCRONIZACIÓN WEB + MÓVIL
+// CAMBIOS RESPECTO A LA VERSIÓN ANTERIOR:
+// 1. _guardarEnFirestore() → AÑADIDO 'idMazorca' al mapa que sube a Firestore.
+//    Ahora la web puede agrupar seguimientos por idMazorca.
+// 2. sincronizarDesdeFirebase() → Lee 'idMazorca' y 'grupoImagen' desde Firestore
+//    en vez de usar doc.id como idMazorca (era incorrecto y rompía el seguimiento).
+
 import 'dart:io';
-import 'package:flutter/foundation.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import '../../datos/local/base_datos_helper.dart';
 import '../../datos/modelos/deteccion.dart';
 import 'servicio_conectividad.dart';
+import '../../config/constantes.dart';
 
 class ServicioSincronizacion {
   final BaseDatosHelper _db = BaseDatosHelper();
@@ -17,7 +25,6 @@ class ServicioSincronizacion {
 
   bool _sincronizando = false;
 
-  /// Inicializar sincronización automática bidireccional
   void inicializarSincronizacionAutomatica() {
     _conectividad.estadoConexion.listen((tieneConexion) {
       if (tieneConexion && !_sincronizando) {
@@ -34,9 +41,8 @@ class ServicioSincronizacion {
     });
   }
 
-  /// ========================================
-  /// SINCRONIZACIÓN FIREBASE → SQLITE
-  /// ========================================
+  // ─── Sincronización Firebase → SQLite ────────────────────────────────────────
+
   Future<void> sincronizarDesdeFirebase() async {
     try {
       debugPrint('🔄 Iniciando sincronización Firebase → SQLite...');
@@ -46,11 +52,10 @@ class ServicioSincronizacion {
         return;
       }
 
-      // CORRECCIÓN CRÍTICA: Usar workerId en lugar de idUsuario
       final snapshot = await _firestore
-          .collection('detecciones')
-          .where('workerId', isEqualTo: uid)
-          .orderBy('timestamp', descending: true)
+          .collection(Constantes.coleccionDetecciones)
+          .where('trabajadorUID', isEqualTo: uid)
+          .orderBy('fechaDeteccion', descending: true)
           .get();
 
       debugPrint(
@@ -65,33 +70,54 @@ class ServicioSincronizacion {
         try {
           final data = doc.data();
 
-          if (data['idMazorca'] == null ||
-              data['workerId'] == null ||
-              data['fase'] == null ||
-              data['imagenUrl'] == null) {
+          // Validar campos mínimos requeridos del diccionario
+          if (data['trabajadorUID'] == null ||
+              data['nombreFaseDetectada'] == null ||
+              data['imagenURL'] == null) {
             debugPrint(
               '⚠️ Documento ${doc.id} tiene datos incompletos, se omite',
             );
             continue;
           }
 
+          // El campo nombreFaseDetectada puede venir como "Fase Inicial" o "FASE_INICIAL"
+          final String faseFirestore = data['nombreFaseDetectada'] as String;
+          final String faseNormalizada = _normalizarFaseDesdeFirestore(
+            faseFirestore,
+          );
+
+          // ✅ CORRECCIÓN: leer idMazorca desde Firestore (antes se usaba doc.id
+          // lo cual rompía el seguimiento al re-sincronizar porque el idMazorca
+          // no coincidía con el original guardado en SQLite).
+          // Fallback a doc.id solo para registros viejos que no tienen el campo.
+          final String idMazorcaReal =
+              (data['idMazorca'] as String?)?.isNotEmpty == true
+              ? data['idMazorca'] as String
+              : doc.id;
+
+          // ✅ CORRECCIÓN: también leer grupoImagen desde Firestore
+          final String? grupoImagenReal =
+              (data['grupoImagen'] as String?)?.isNotEmpty == true
+              ? data['grupoImagen'] as String
+              : null;
+
           final deteccion = Deteccion(
-            idMazorca: data['idMazorca'] as String,
-            grupoImagen: data['grupoImagen'] as String?,
-            idUsuario: data['workerCedula'] as String? ?? '',
-            workerId: data['workerId'] as String,
-            fase: data['fase'] as String,
-            confianza: (data['confianza'] as num).toDouble(),
-            severidad: data['severidad'] as int,
-            colorSemaforo: data['colorSemaforo'] as String,
-            rutaImagen: data['imagenUrl'] as String,
+            idMazorca: idMazorcaReal,
+            grupoImagen: grupoImagenReal,
+            idUsuario: uid,
+            workerId: uid,
+            fase: faseNormalizada,
+            confianza: ((data['porcentajeInfeccion'] as num?) ?? 0) / 100,
+            severidad: (data['faseDetectada'] as int?) ?? 0,
+            colorSemaforo: data['colorSemaforo'] as String? ?? 'verde',
+            rutaImagen: data['imagenURL'] as String? ?? '',
             latitud: (data['latitud'] as num?)?.toDouble() ?? 0.0,
             longitud: (data['longitud'] as num?)?.toDouble() ?? 0.0,
-            direccion: data['direccion'] as String?,
-            lote: data['lote'] as String?,
-            notas: data['notas'] as String?,
+            lote: data['loteNombre'] as String?,
+            notas: data['observaciones'] as String?,
             fecha:
-                (data['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
+                (data['fechaDeteccion'] as Timestamp?)?.toDate() ??
+                DateTime.now(),
             sincronizado: true,
           );
 
@@ -107,13 +133,35 @@ class ServicioSincronizacion {
       );
     } catch (e) {
       debugPrint('❌ Error en sincronización desde Firebase: $e');
-      debugPrint('Stack trace: ${StackTrace.current}');
     }
   }
 
-  /// ========================================
-  /// SINCRONIZACIÓN SQLITE → FIREBASE
-  /// ========================================
+  String _normalizarFaseDesdeFirestore(String faseFirestore) {
+    // Si ya es formato YOLO, devolver tal cual
+    if (Constantes.nombresClases.contains(faseFirestore)) {
+      return faseFirestore;
+    }
+
+    // Mapear formato legible → formato YOLO
+    const mapa = {
+      'Sana': 'SANA',
+      'sana': 'SANA',
+      'Fase Inicial': 'FASE_INICIAL',
+      'fase inicial': 'FASE_INICIAL',
+      'Temprana': 'FASE_INICIAL',
+      'Fase Intermedia': 'FASE_INTERMEDIA',
+      'fase intermedia': 'FASE_INTERMEDIA',
+      'Intermedia': 'FASE_INTERMEDIA',
+      'Fase Avanzada': 'FASE_AVANZADA',
+      'fase avanzada': 'FASE_AVANZADA',
+      'Avanzada': 'FASE_AVANZADA',
+    };
+
+    return mapa[faseFirestore] ?? 'SANA';
+  }
+
+  // ─── Sincronización SQLite → Firebase ────────────────────────────────────────
+
   Future<void> sincronizarTodo() async {
     if (_sincronizando) {
       debugPrint('⚠️ Ya hay una sincronización en curso');
@@ -141,7 +189,6 @@ class ServicioSincronizacion {
       for (final deteccion in pendientes) {
         try {
           if (!_conectividad.tieneConexion) break;
-
           await _sincronizarDeteccion(deteccion);
           await _db.marcarComoSincronizado(deteccion.id!);
           debugPrint('✅ Detección ${deteccion.id} sincronizada');
@@ -180,8 +227,9 @@ class ServicioSincronizacion {
     if (workerId == null) throw Exception('Usuario no autenticado');
 
     final timestamp = DateTime.now().millisecondsSinceEpoch;
-    final nombreArchivo = '${idMazorca}_$timestamp.jpg';
-    final rutaStorage = 'detecciones/$workerId/$nombreArchivo';
+    final fecha = DateTime.now().toIso8601String().substring(0, 10);
+    final rutaStorage =
+        '${Constantes.carpetaImagenesDetecciones}/$workerId/$fecha/mazorca_$timestamp.jpg';
 
     final storageRef = _storage.ref().child(rutaStorage);
     final snapshot = await storageRef.putFile(
@@ -192,6 +240,37 @@ class ServicioSincronizacion {
     return await snapshot.ref.getDownloadURL();
   }
 
+  // ✅ MÉTODO PÚBLICO para subir imágenes desde escaneo inmediato
+  Future<String> subirImagenPublica({
+    required File archivoLocal,
+    required String workerId,
+  }) async {
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final fecha = DateTime.now().toIso8601String().substring(0, 10);
+    final rutaStorage =
+        '${Constantes.carpetaImagenesDetecciones}/$workerId/$fecha/mazorca_$timestamp.jpg';
+
+    final storageRef = _storage.ref().child(rutaStorage);
+    final snapshot = await storageRef.putFile(
+      archivoLocal,
+      SettableMetadata(contentType: 'image/jpeg'),
+    );
+
+    final url = await snapshot.ref.getDownloadURL();
+    debugPrint('✅ Imagen subida: $url');
+    return url;
+  }
+
+  // ─── Guardar en Firestore ─────────────────────────────────────────────────────
+  //
+  // Campos que se guardan:
+  //   ✅ trabajadorUID, trabajadorNombre
+  //   ✅ nombreFaseDetectada, faseDetectada, porcentajeInfeccion
+  //   ✅ imagenURL, loteNombre, colorSemaforo, observaciones
+  //   ✅ latitud, longitud, fechaDeteccion
+  //   ✅ grupoImagen  → agrupa bounding boxes de la misma captura
+  //   ✅ idMazorca    → identifica la mazorca única para seguimiento en web
+  //
   Future<void> _guardarEnFirestore(
     Deteccion deteccion,
     String imagenUrl,
@@ -199,84 +278,145 @@ class ServicioSincronizacion {
     final workerId = _auth.currentUser?.uid;
     if (workerId == null) throw Exception('Usuario no autenticado');
 
+    // Obtener nombre del trabajador desde Firestore
     String workerNombre = _auth.currentUser?.email ?? 'Desconocido';
     try {
       final workerDoc = await _firestore
-          .collection('workers')
+          .collection(Constantes.coleccionUsuarios)
           .doc(workerId)
           .get();
       if (workerDoc.exists) {
-        workerNombre = workerDoc.data()?['name'] ?? workerNombre;
+        workerNombre = workerDoc.data()?['nombreCompleto'] ?? workerNombre;
       }
     } catch (_) {}
 
-    // CORRECCIÓN CRÍTICA: Usar workerId como clave principal
-    await _firestore.collection('detecciones').add({
-      'idMazorca': deteccion.idMazorca,
-      'grupoImagen': deteccion.grupoImagen,
-      'idUsuario': deteccion.idUsuario,
-      'workerId': workerId, // ✅ CRÍTICO: Este campo se usa en las reglas
-      'workerCedula': deteccion.idUsuario,
-      'workerNombre': workerNombre,
-      'fase': deteccion.fase,
-      'confianza': deteccion.confianza,
-      'severidad': deteccion.severidad,
+    // Convertir fase YOLO a valores del diccionario
+    final String nombreFaseLegible = Constantes.obtenerNombreLegible(
+      deteccion.fase,
+    );
+    final int numeroFase = Constantes.obtenerNumeroFaseFirestore(
+      deteccion.fase,
+    );
+
+    debugPrint('📝 Guardando en Firestore:');
+    debugPrint('   trabajadorUID      : $workerId');
+    debugPrint('   trabajadorNombre   : $workerNombre');
+    debugPrint('   nombreFaseDetectada: $nombreFaseLegible');
+    debugPrint('   faseDetectada      : $numeroFase');
+    debugPrint(
+      '   porcentajeInfeccion: ${(deteccion.confianza * 100).toStringAsFixed(1)}%',
+    );
+    debugPrint('   colorSemaforo      : ${deteccion.colorSemaforo}');
+    debugPrint('   loteNombre         : ${deteccion.lote ?? "(sin lote)"}');
+    debugPrint(
+      '   grupoImagen        : ${deteccion.grupoImagen ?? "(sin grupo)"}',
+    );
+    debugPrint('   idMazorca          : ${deteccion.idMazorca}'); // ✅ nuevo log
+
+    await _firestore.collection(Constantes.coleccionDetecciones).add({
+      'trabajadorUID': workerId,
+      'trabajadorNombre': workerNombre,
+      'nombreFaseDetectada': nombreFaseLegible,
+      'faseDetectada': numeroFase,
+      'porcentajeInfeccion': deteccion.confianza * 100,
+      'imagenURL': imagenUrl,
+      'loteNombre': deteccion.lote ?? '',
       'colorSemaforo': deteccion.colorSemaforo,
-      'imagenUrl': imagenUrl,
+      'observaciones': deteccion.notas ?? '',
       'latitud': deteccion.latitud,
       'longitud': deteccion.longitud,
-      'direccion': deteccion.direccion,
-      'lote': deteccion.lote,
-      'notas': deteccion.notas,
-      'fecha': Timestamp.fromDate(deteccion.fecha),
-      'timestamp': FieldValue.serverTimestamp(),
-      'createdAt': FieldValue.serverTimestamp(),
-      'sincronizado': true,
+      'fechaDeteccion': Timestamp.fromDate(deteccion.fecha),
+      'grupoImagen': deteccion.grupoImagen ?? '',
+      'idMazorca':
+          deteccion.idMazorca, // ✅ CAMPO NUEVO — clave para seguimiento web
     });
+
+    debugPrint('✅ Detección guardada en Firestore correctamente');
   }
+
+  // ─── Sincronización inmediata (con conexión activa) ───────────────────────────
 
   Future<String> sincronizarDeteccionInmediata({
     required Deteccion deteccion,
-    required File imagenFile,
   }) async {
     if (!_conectividad.tieneConexion) {
       throw Exception('Sin conexión a internet');
     }
 
-    final imagenUrl = await _subirImagenDirecta(
-      archivo: imagenFile,
-      idUsuario: deteccion.idUsuario,
-      idMazorca: deteccion.idMazorca,
-    );
+    String imagenUrl = deteccion.rutaImagen;
+
+    if (!imagenUrl.startsWith('http')) {
+      imagenUrl = await _subirImagenAStorage(
+        rutaLocal: deteccion.rutaImagen,
+        idUsuario: deteccion.idUsuario,
+        idMazorca: deteccion.idMazorca,
+      );
+    }
 
     await _guardarEnFirestore(deteccion, imagenUrl);
+
+    if (deteccion.id != null) {
+      await _db.marcarComoSincronizado(deteccion.id!);
+      await _db.actualizarRutaImagen(deteccion.id!, imagenUrl);
+    }
 
     return imagenUrl;
   }
 
-  Future<String> _subirImagenDirecta({
-    required File archivo,
-    required String idUsuario,
-    required String idMazorca,
-  }) async {
-    final workerId = _auth.currentUser?.uid;
-    if (workerId == null) throw Exception('Usuario no autenticado');
+  // ─── Eliminar detección de Firebase ──────────────────────────────────────────
 
-    final timestamp = DateTime.now().millisecondsSinceEpoch;
-    final nombreArchivo = '${idMazorca}_$timestamp.jpg';
-    final rutaStorage = 'detecciones/$workerId/$nombreArchivo';
+  Future<void> eliminarDeteccionFirebase(String idMazorca) async {
+    try {
+      final uid = _auth.currentUser?.uid;
+      if (uid == null) return;
 
-    final storageRef = _storage.ref().child(rutaStorage);
-    final snapshot = await storageRef.putFile(
-      archivo,
-      SettableMetadata(contentType: 'image/jpeg'),
-    );
+      // ✅ Ahora sí funciona porque idMazorca existe en Firestore
+      final query = await _firestore
+          .collection(Constantes.coleccionDetecciones)
+          .where('trabajadorUID', isEqualTo: uid)
+          .where('idMazorca', isEqualTo: idMazorca)
+          .get();
 
-    return await snapshot.ref.getDownloadURL();
+      for (var doc in query.docs) {
+        await doc.reference.delete();
+        debugPrint('🗑️ Detección ${doc.id} eliminada de Firebase');
+      }
+    } catch (e) {
+      debugPrint('❌ Error eliminando detección de Firebase: $e');
+    }
   }
 
-  Future<int> obtenerCantidadPendientes() async {
-    final pendientes = await _db.obtenerDeteccionesNoSincronizadas();
-    return pendientes.length;
+  // ─── Obtener tratamiento recomendado desde colección "tratamientos" ───────────
+  //
+  // El campo 'fase' en Firestore debe coincidir EXACTAMENTE con la etiqueta YOLO.
+  // La administradora debe crear protocolos con fase:
+  //   "SANA" | "FASE_INICIAL" | "FASE_INTERMEDIA" | "FASE_AVANZADA"
+  //
+  Future<Map<String, dynamic>?> obtenerTratamientoRecomendado(
+    String fase,
+  ) async {
+    try {
+      debugPrint('🔍 Buscando tratamiento para fase: $fase');
+
+      final query = await _firestore
+          .collection(Constantes.coleccionTratamientos)
+          .where('fase', isEqualTo: fase)
+          .limit(1)
+          .get();
+
+      if (query.docs.isNotEmpty) {
+        final data = query.docs.first.data();
+        debugPrint('✅ Tratamiento encontrado: ${data['nombre']}');
+        return data;
+      }
+
+      debugPrint('⚠️ No se encontró tratamiento para $fase');
+      debugPrint('💡 La administradora debe crear este protocolo en la web');
+      debugPrint('💡 El campo "fase" debe ser exactamente: $fase');
+      return null;
+    } catch (e) {
+      debugPrint('❌ Error consultando tratamiento: $e');
+      return null;
+    }
   }
 }

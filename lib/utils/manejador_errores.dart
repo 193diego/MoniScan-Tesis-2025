@@ -1,3 +1,5 @@
+// lib/utils/manejador_errores.dart
+// ✅ VERSIÓN FINAL - Sin warnings
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'dart:async';
@@ -8,32 +10,29 @@ class ManejadorErrores {
   factory ManejadorErrores() => _instancia;
   ManejadorErrores._interno();
 
-  /// Inicializar manejador global de errores
   static void inicializar() {
-    // Capturar errores de Flutter
     FlutterError.onError = (FlutterErrorDetails details) {
       FlutterError.presentError(details);
       _registrarError(details.exception, details.stack, 'Flutter Error');
     };
 
-    // Capturar errores asíncronos no manejados
     PlatformDispatcher.instance.onError = (error, stack) {
       _registrarError(error, stack, 'Async Error');
       return true;
     };
 
-    // Capturar errores de zona
-    runZonedGuarded(
-      () {
-        // El código de la app se ejecutará aquí
-      },
-      (error, stack) {
-        _registrarError(error, stack, 'Zone Error');
-      },
-    );
+    runZonedGuarded(() {}, (error, stack) {
+      _registrarError(error, stack, 'Zone Error');
+    });
   }
 
   /// Registrar error en consola y sistema de logging
+  ///
+  /// Para producción, activar Firebase Crashlytics:
+  /// ```dart
+  /// import 'package:firebase_crashlytics/firebase_crashlytics.dart';
+  /// FirebaseCrashlytics.instance.recordError(error, stack, fatal: false);
+  /// ```
   static void _registrarError(dynamic error, StackTrace? stack, String tipo) {
     debugPrint('═══════════════════════════════════════');
     debugPrint('❌ ERROR CAPTURADO: $tipo');
@@ -41,12 +40,8 @@ class ManejadorErrores {
     debugPrint('Error: $error');
     debugPrint('Stack Trace: $stack');
     debugPrint('═══════════════════════════════════════');
-
-    // TODO: Aquí se puede integrar con Firebase Crashlytics
-    // FirebaseCrashlytics.instance.recordError(error, stack);
   }
 
-  /// Ejecutar función con manejo de errores
   static Future<T?> ejecutarSeguro<T>({
     required Future<T> Function() funcion,
     required BuildContext? context,
@@ -86,7 +81,6 @@ class ManejadorErrores {
     }
   }
 
-  /// Manejar error mostrando mensaje al usuario
   static void _manejarError({
     required BuildContext? context,
     required String error,
@@ -105,7 +99,6 @@ class ManejadorErrores {
     }
   }
 
-  /// Mostrar Snackbar de error
   static void _mostrarSnackbar(BuildContext context, String mensaje) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -128,7 +121,6 @@ class ManejadorErrores {
     );
   }
 
-  /// Mostrar diálogo de error detallado
   static void _mostrarDialogoError(
     BuildContext context,
     String mensaje,
@@ -137,8 +129,8 @@ class ManejadorErrores {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Row(
-          children: const [
+        title: const Row(
+          children: [
             Icon(Icons.error_outline, color: Colors.red),
             SizedBox(width: 12),
             Text('Error'),
@@ -148,10 +140,7 @@ class ManejadorErrores {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              mensaje,
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
+            Text(mensaje, style: const TextStyle(fontWeight: FontWeight.bold)),
             if (kDebugMode) ...[
               const SizedBox(height: 12),
               const Text(
@@ -184,7 +173,6 @@ class ManejadorErrores {
   }
 }
 
-/// Extension para manejo de errores en Future
 extension FutureErrorHandling<T> on Future<T> {
   Future<T?> conManejo(BuildContext context, {String? mensajeError}) async {
     return ManejadorErrores.ejecutarSeguro(
